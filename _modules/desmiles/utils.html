@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" >
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>desmiles.utils &mdash; desmiles  documentation</title>
+      <link rel="stylesheet" href="../../_static/pygments.css" type="text/css" />
+      <link rel="stylesheet" href="../../_static/css/theme.css" type="text/css" />
+  <!--[if lt IE 9]>
+    <script src="../../_static/js/html5shiv.min.js"></script>
+  <![endif]-->
+  
+        <script data-url_root="../../" id="documentation_options" src="../../_static/documentation_options.js"></script>
+        <script src="../../_static/jquery.js"></script>
+        <script src="../../_static/underscore.js"></script>
+        <script src="../../_static/doctools.js"></script>
+    <script src="../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+            <a href="../../index.html" class="icon icon-home"> desmiles
+          </a>
+              <div class="version">
+                BETA
+              </div>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <ul>
+<li class="toctree-l1"><a class="reference internal" href="../../desmiles.html">Usage</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../release-notes.html">Release notes</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../issues.html">Open issues</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../index.html">desmiles</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../index.html" class="icon icon-home"></a> &raquo;</li>
+          <li><a href="../index.html">Module code</a> &raquo;</li>
+      <li>desmiles.utils</li>
+      <li class="wy-breadcrumbs-aside">
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <h1>Source code for desmiles.utils</h1><div class="highlight"><pre>
+<span></span><span class="kn">import</span> <span class="nn">os</span>
+<span class="kn">import</span> <span class="nn">numpy</span> <span class="k">as</span> <span class="nn">np</span>
+<span class="kn">from</span> <span class="nn">pathlib</span> <span class="kn">import</span> <span class="n">Path</span>
+<span class="kn">from</span> <span class="nn">.models</span> <span class="kn">import</span> <span class="o">*</span>
+<span class="kn">from</span> <span class="nn">.learner</span> <span class="kn">import</span> <span class="o">*</span>
+<span class="kn">from</span> <span class="nn">.data</span> <span class="kn">import</span> <span class="n">DesmilesLoader</span><span class="p">,</span> <span class="n">FpSmilesList</span>
+<span class="kn">from</span> <span class="nn">.config</span> <span class="kn">import</span> <span class="n">DATA_DIR</span>
+<span class="kn">from</span> <span class="nn">rdkit</span> <span class="kn">import</span> <span class="n">Chem</span>
+<span class="kn">from</span> <span class="nn">rdkit.Chem</span> <span class="kn">import</span> <span class="n">Draw</span><span class="p">,</span><span class="n">rdMolDescriptors</span><span class="p">,</span><span class="n">AllChem</span>
+<span class="kn">from</span> <span class="nn">rdkit.Chem.Draw</span> <span class="kn">import</span> <span class="n">IPythonConsole</span>
+<span class="kn">from</span> <span class="nn">rdkit.Chem.AllChem</span> <span class="kn">import</span> <span class="n">GetMorganFingerprintAsBitVect</span>
+<span class="kn">import</span> <span class="nn">scipy.sparse</span>
+<span class="kn">from</span> <span class="nn">functools</span> <span class="kn">import</span> <span class="n">partial</span>
+<span class="kn">import</span> <span class="nn">torch</span>
+<span class="kn">import</span> <span class="nn">torch.nn.functional</span> <span class="k">as</span> <span class="nn">F</span>
+<span class="kn">from</span> <span class="nn">fastai.text</span> <span class="kn">import</span> <span class="n">Vocab</span>
+<span class="kn">from</span> <span class="nn">fastai.basic_data</span> <span class="kn">import</span> <span class="n">DataBunch</span>
+
+
+<div class="viewcode-block" id="load_pretrained_desmiles"><a class="viewcode-back" href="../../desmiles.html#desmiles.utils.load_pretrained_desmiles">[docs]</a><span class="k">def</span> <span class="nf">load_pretrained_desmiles</span><span class="p">(</span><span class="n">path</span><span class="p">,</span>
+                             <span class="n">return_learner</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
+                             <span class="n">return_rnn</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
+                             <span class="n">fp_emb_sz</span><span class="o">=</span><span class="mi">2000</span><span class="p">,</span>
+                             <span class="n">emb_sz</span><span class="o">=</span><span class="mi">400</span><span class="p">,</span>
+                             <span class="n">nh</span><span class="o">=</span><span class="mi">2000</span><span class="p">,</span>
+                             <span class="n">nl</span><span class="o">=</span><span class="mi">5</span><span class="p">,</span>
+                             <span class="n">itos_fn</span><span class="o">=</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">DATA_DIR</span><span class="p">,</span> <span class="s1">&#39;pretrained&#39;</span><span class="p">,</span> <span class="s1">&#39;id.dec8000&#39;</span><span class="p">),</span>
+                             <span class="n">bs</span><span class="o">=</span><span class="mi">200</span><span class="p">,</span>
+                             <span class="n">device</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+                             <span class="n">with_opt</span><span class="o">=</span><span class="kc">True</span><span class="p">):</span>
+    <span class="k">if</span> <span class="n">device</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">device</span> <span class="o">=</span> <span class="s2">&quot;cuda&quot;</span> <span class="k">if</span> <span class="n">torch</span><span class="o">.</span><span class="n">cuda</span><span class="o">.</span><span class="n">is_available</span><span class="p">()</span> <span class="k">else</span> <span class="s2">&quot;cpu&quot;</span>
+    <span class="n">path</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="n">path</span><span class="p">)</span>
+    <span class="n">path</span> <span class="o">=</span> <span class="n">path</span><span class="o">.</span><span class="n">parent</span> <span class="o">/</span> <span class="n">path</span><span class="o">.</span><span class="n">stem</span>
+    <span class="n">itos</span> <span class="o">=</span> <span class="p">[</span><span class="n">s</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span> <span class="k">for</span> <span class="n">i</span><span class="p">,</span><span class="n">s</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="nb">open</span><span class="p">(</span><span class="n">itos_fn</span><span class="p">,</span> <span class="n">encoding</span><span class="o">=</span><span class="s1">&#39;utf-8&#39;</span><span class="p">))]</span>
+    <span class="n">vocab</span> <span class="o">=</span> <span class="n">Vocab</span><span class="p">(</span><span class="n">itos</span><span class="p">)</span>
+
+    <span class="n">trn_ds</span> <span class="o">=</span> <span class="n">FpSmilesList</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">([]),</span><span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">([]))</span>
+    <span class="n">val_ds</span> <span class="o">=</span> <span class="n">FpSmilesList</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">([]),</span><span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">([]))</span>
+
+    <span class="n">trn_dl</span> <span class="o">=</span> <span class="n">DesmilesLoader</span><span class="p">(</span><span class="n">trn_ds</span><span class="p">,</span> <span class="n">bs</span><span class="o">=</span><span class="n">bs</span><span class="p">,</span> <span class="n">vocab</span><span class="o">=</span><span class="n">vocab</span><span class="p">)</span>
+    <span class="n">val_dl</span> <span class="o">=</span> <span class="n">DesmilesLoader</span><span class="p">(</span><span class="n">val_ds</span><span class="p">,</span> <span class="n">bs</span><span class="o">=</span><span class="n">bs</span><span class="p">,</span> <span class="n">vocab</span><span class="o">=</span><span class="n">vocab</span><span class="p">)</span>
+    <span class="n">db</span> <span class="o">=</span> <span class="n">DataBunch</span><span class="p">(</span><span class="n">trn_dl</span><span class="p">,</span> <span class="n">val_dl</span><span class="p">)</span>
+    <span class="n">learner</span> <span class="o">=</span> <span class="n">desmiles_model_learner</span><span class="p">(</span><span class="n">db</span><span class="p">,</span> <span class="n">drop_mult</span><span class="o">=</span><span class="mf">0.7</span><span class="p">,</span> <span class="n">fp_emb_sz</span><span class="o">=</span><span class="n">fp_emb_sz</span><span class="p">,</span> <span class="n">emb_sz</span><span class="o">=</span><span class="n">emb_sz</span><span class="p">,</span> <span class="n">nh</span><span class="o">=</span><span class="n">nh</span><span class="p">,</span> <span class="n">nl</span><span class="o">=</span><span class="n">nl</span><span class="p">,</span> <span class="n">pad_token</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span> <span class="n">bias</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+    <span class="c1"># purge makes loading really slow!!</span>
+    <span class="n">learner</span><span class="o">.</span><span class="n">load</span><span class="p">(</span><span class="n">path</span><span class="p">,</span> <span class="n">purge</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="n">device</span><span class="p">,</span> <span class="n">with_opt</span><span class="o">=</span><span class="n">with_opt</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">return_learner</span><span class="p">:</span>
+        <span class="n">learner</span><span class="o">.</span><span class="n">model</span> <span class="o">=</span> <span class="n">learner</span><span class="o">.</span><span class="n">model</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">device</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">learner</span>
+    <span class="k">if</span> <span class="n">return_rnn</span><span class="p">:</span>
+        <span class="n">rnn_desmiles</span> <span class="o">=</span> <span class="n">RecurrentDESMILES</span><span class="p">(</span><span class="n">learner</span><span class="o">.</span><span class="n">model</span><span class="p">)</span><span class="o">.</span><span class="n">eval</span><span class="p">()</span>
+        <span class="k">return</span> <span class="n">rnn_desmiles</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">device</span><span class="p">)</span>
+    <span class="n">model</span> <span class="o">=</span> <span class="n">learner</span><span class="o">.</span><span class="n">model</span>
+    <span class="k">return</span> <span class="n">model</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">device</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="load_old_pretrained_desmiles"><a class="viewcode-back" href="../../desmiles.html#desmiles.utils.load_old_pretrained_desmiles">[docs]</a><span class="k">def</span> <span class="nf">load_old_pretrained_desmiles</span><span class="p">(</span><span class="n">path</span><span class="p">,</span>
+                                 <span class="n">return_learner</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
+                                 <span class="n">return_rnn</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
+                                 <span class="n">bs</span><span class="o">=</span><span class="mi">200</span><span class="p">,</span>
+                                 <span class="n">fp_emb_sz</span><span class="o">=</span><span class="mi">2000</span><span class="p">,</span>
+                                 <span class="n">emb_sz</span><span class="o">=</span><span class="mi">400</span><span class="p">,</span>
+                                 <span class="n">nh</span><span class="o">=</span><span class="mi">2000</span><span class="p">,</span>
+                                 <span class="n">nl</span><span class="o">=</span><span class="mi">5</span><span class="p">,</span>
+                                 <span class="n">clip</span><span class="o">=</span><span class="mf">0.3</span><span class="p">,</span>
+                                 <span class="n">alpha</span><span class="o">=</span><span class="mf">2.</span><span class="p">,</span>
+                                 <span class="n">beta</span><span class="o">=</span><span class="mf">1.</span><span class="p">,</span>
+                                 <span class="n">itos_fn</span><span class="o">=</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">DATA_DIR</span><span class="p">,</span> <span class="s1">&#39;pretrained&#39;</span><span class="p">,</span> <span class="s1">&#39;id.dec8000&#39;</span><span class="p">),</span>
+                                 <span class="n">device</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+    <span class="sd">&#39;&#39;&#39;</span>
+<span class="sd">    Load a DESMILES model whose weights were generated in pytorch 0.4</span>
+<span class="sd">    &#39;&#39;&#39;</span>
+    <span class="n">path</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="n">path</span><span class="p">)</span>
+    <span class="n">path</span> <span class="o">=</span> <span class="n">path</span><span class="o">.</span><span class="n">parent</span> <span class="o">/</span> <span class="n">path</span><span class="o">.</span><span class="n">stem</span>
+    <span class="k">if</span> <span class="n">device</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">device</span> <span class="o">=</span> <span class="s2">&quot;cuda&quot;</span> <span class="k">if</span> <span class="n">torch</span><span class="o">.</span><span class="n">cuda</span><span class="o">.</span><span class="n">is_available</span><span class="p">()</span> <span class="k">else</span> <span class="s2">&quot;cpu&quot;</span>
+    <span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="n">itos_fn</span><span class="p">,</span> <span class="n">encoding</span><span class="o">=</span><span class="s1">&#39;utf-8&#39;</span><span class="p">)</span> <span class="k">as</span> <span class="n">itos_file</span><span class="p">:</span>
+        <span class="n">itos</span> <span class="o">=</span> <span class="p">[</span><span class="n">s</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span> <span class="k">for</span> <span class="n">i</span><span class="p">,</span><span class="n">s</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">itos_file</span><span class="p">)]</span>
+    <span class="n">vocab</span> <span class="o">=</span> <span class="n">Vocab</span><span class="p">(</span><span class="n">itos</span><span class="p">)</span>
+    <span class="n">bs</span><span class="o">=</span><span class="mi">1</span>
+    <span class="n">trn_ds</span> <span class="o">=</span> <span class="n">FpSmilesList</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">([]),</span> <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">([]),</span> <span class="n">vocab</span><span class="p">)</span>
+    <span class="n">val_ds</span> <span class="o">=</span> <span class="n">FpSmilesList</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">([]),</span> <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">([]),</span> <span class="n">vocab</span><span class="p">)</span>
+    <span class="n">trn_dl</span> <span class="o">=</span> <span class="n">DesmilesLoader</span><span class="p">(</span><span class="n">trn_ds</span><span class="p">,</span> <span class="n">vocab</span><span class="o">=</span><span class="n">vocab</span><span class="p">,</span> <span class="n">bs</span><span class="o">=</span><span class="n">bs</span><span class="p">,</span> <span class="n">sampler</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span>
+    <span class="n">val_dl</span> <span class="o">=</span> <span class="n">DesmilesLoader</span><span class="p">(</span><span class="n">val_ds</span><span class="p">,</span> <span class="n">vocab</span><span class="o">=</span><span class="n">vocab</span><span class="p">,</span> <span class="n">bs</span><span class="o">=</span><span class="n">bs</span><span class="p">,</span> <span class="n">sampler</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span>
+    <span class="n">db</span> <span class="o">=</span> <span class="n">DataBunch</span><span class="p">(</span><span class="n">trn_dl</span><span class="p">,</span> <span class="n">val_dl</span><span class="p">,</span> <span class="n">path</span><span class="o">=</span><span class="s2">&quot;.&quot;</span><span class="p">)</span>
+    <span class="n">learn</span> <span class="o">=</span> <span class="n">desmiles_model_learner</span><span class="p">(</span><span class="n">db</span><span class="p">,</span> <span class="n">drop_mult</span><span class="o">=</span><span class="mf">0.7</span><span class="p">,</span> <span class="n">fp_emb_sz</span><span class="o">=</span><span class="n">fp_emb_sz</span><span class="p">,</span> <span class="n">emb_sz</span><span class="o">=</span><span class="n">emb_sz</span><span class="p">,</span> <span class="n">nh</span><span class="o">=</span><span class="n">nh</span><span class="p">,</span> <span class="n">nl</span><span class="o">=</span><span class="n">nl</span><span class="p">,</span> <span class="n">pad_token</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span> <span class="n">bias</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">clip</span><span class="o">=</span><span class="n">clip</span><span class="p">,</span> <span class="n">alpha</span><span class="o">=</span><span class="n">alpha</span><span class="p">,</span> <span class="n">beta</span><span class="o">=</span><span class="n">beta</span><span class="p">)</span>
+    <span class="n">learn</span><span class="o">.</span><span class="n">model</span><span class="o">.</span><span class="n">reset</span><span class="p">()</span>
+    <span class="n">learn</span><span class="o">.</span><span class="n">load_old</span><span class="p">(</span><span class="n">path</span><span class="p">,</span> <span class="n">strict</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+    <span class="n">learn</span><span class="o">.</span><span class="n">model</span><span class="o">.</span><span class="n">eval</span><span class="p">()</span>
+    <span class="n">learn</span><span class="o">.</span><span class="n">model</span><span class="o">.</span><span class="n">reset</span><span class="p">()</span>
+    <span class="k">if</span> <span class="n">return_learner</span><span class="p">:</span>
+        <span class="n">learn</span><span class="o">.</span><span class="n">model</span> <span class="o">=</span> <span class="n">learn</span><span class="o">.</span><span class="n">model</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">device</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">learn</span>
+    <span class="k">if</span> <span class="n">return_rnn</span><span class="p">:</span>
+        <span class="n">rnn_desmiles</span> <span class="o">=</span> <span class="n">RecurrentDESMILES</span><span class="p">(</span><span class="n">learn</span><span class="o">.</span><span class="n">model</span><span class="p">)</span><span class="o">.</span><span class="n">eval</span><span class="p">()</span>
+        <span class="k">return</span> <span class="n">rnn_desmiles</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">device</span><span class="p">)</span>
+    <span class="n">model</span> <span class="o">=</span> <span class="n">learn</span><span class="o">.</span><span class="n">model</span>
+    <span class="k">return</span> <span class="n">model</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">device</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="smiles_to_fingerprint"><a class="viewcode-back" href="../../desmiles.html#desmiles.utils.smiles_to_fingerprint">[docs]</a><span class="k">def</span> <span class="nf">smiles_to_fingerprint</span><span class="p">(</span><span class="n">smiles_str</span><span class="p">,</span> <span class="n">sparse</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">as_tensor</span><span class="o">=</span><span class="kc">False</span><span class="p">):</span>
+    <span class="n">rdmol</span> <span class="o">=</span> <span class="n">Chem</span><span class="o">.</span><span class="n">MolFromSmiles</span><span class="p">(</span><span class="n">smiles_str</span><span class="p">)</span>
+    <span class="n">fp</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">concatenate</span><span class="p">([</span><span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">GetMorganFingerprintAsBitVect</span><span class="p">(</span><span class="n">rdmol</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="n">useChirality</span><span class="o">=</span><span class="kc">True</span><span class="p">),</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">int8</span><span class="p">),</span> <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span>
+        <span class="n">GetMorganFingerprintAsBitVect</span><span class="p">(</span><span class="n">rdmol</span><span class="p">,</span> <span class="mi">3</span><span class="p">,</span> <span class="n">useChirality</span><span class="o">=</span><span class="kc">True</span><span class="p">),</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">int8</span><span class="p">)])</span>
+    <span class="k">if</span> <span class="n">sparse</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">scipy</span><span class="o">.</span><span class="n">sparse</span><span class="o">.</span><span class="n">csr_matrix</span><span class="p">(</span><span class="n">fp</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">as_tensor</span><span class="p">:</span>
+        <span class="kn">import</span> <span class="nn">torch</span>
+        <span class="n">device</span> <span class="o">=</span> <span class="s1">&#39;cuda&#39;</span> <span class="k">if</span> <span class="n">torch</span><span class="o">.</span><span class="n">cuda</span><span class="o">.</span><span class="n">is_available</span><span class="p">()</span> <span class="k">else</span> <span class="s1">&#39;cpu&#39;</span>
+        <span class="k">return</span> <span class="n">torch</span><span class="o">.</span><span class="n">tensor</span><span class="p">(</span><span class="n">fp</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">))</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">device</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">fp</span></div>
+
+
+<div class="viewcode-block" id="process_smiles"><a class="viewcode-back" href="../../desmiles.html#desmiles.utils.process_smiles">[docs]</a><span class="k">def</span> <span class="nf">process_smiles</span><span class="p">(</span><span class="n">sm</span><span class="p">):</span>
+    <span class="n">m</span> <span class="o">=</span> <span class="n">Chem</span><span class="o">.</span><span class="n">MolFromSmiles</span><span class="p">(</span><span class="n">sm</span><span class="p">)</span>
+    <span class="n">AllChem</span><span class="o">.</span><span class="n">Compute2DCoords</span><span class="p">(</span><span class="n">m</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">m</span></div>
+
+
+<div class="viewcode-block" id="image_of_mols"><a class="viewcode-back" href="../../desmiles.html#desmiles.utils.image_of_mols">[docs]</a><span class="k">def</span> <span class="nf">image_of_mols</span><span class="p">(</span><span class="n">smiles_list</span><span class="p">,</span> <span class="n">molsPerRow</span><span class="o">=</span><span class="mi">5</span><span class="p">,</span> <span class="n">subImgSize</span><span class="o">=</span><span class="p">(</span><span class="mi">200</span><span class="p">,</span><span class="mi">200</span><span class="p">),</span> <span class="n">labels</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+    <span class="n">mols</span> <span class="o">=</span> <span class="p">[</span><span class="n">process_smiles</span><span class="p">(</span><span class="n">sm</span><span class="p">)</span> <span class="k">for</span> <span class="n">sm</span> <span class="ow">in</span> <span class="n">smiles_list</span><span class="p">]</span>
+    <span class="n">img</span> <span class="o">=</span> <span class="n">Draw</span><span class="o">.</span><span class="n">MolsToGridImage</span><span class="p">(</span><span class="n">mols</span><span class="p">,</span> <span class="n">molsPerRow</span><span class="o">=</span><span class="n">molsPerRow</span><span class="p">,</span> <span class="n">subImgSize</span><span class="o">=</span><span class="n">subImgSize</span><span class="p">,</span> <span class="n">useSVG</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">legends</span><span class="o">=</span><span class="n">labels</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">img</span></div>
+
+<div class="viewcode-block" id="accuracy4"><a class="viewcode-back" href="../../desmiles.html#desmiles.utils.accuracy4">[docs]</a><span class="k">def</span> <span class="nf">accuracy4</span><span class="p">(</span><span class="nb">input</span><span class="p">,</span> <span class="n">targs</span><span class="p">):</span>
+    <span class="s2">&quot;Compute accuracy with `targs` when `input` is bs * n_classes, excluding tokens 0--3.&quot;</span>
+    <span class="n">n</span> <span class="o">=</span> <span class="n">targs</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+    <span class="nb">input</span> <span class="o">=</span> <span class="nb">input</span><span class="o">.</span><span class="n">argmax</span><span class="p">(</span><span class="n">dim</span><span class="o">=-</span><span class="mi">1</span><span class="p">)</span><span class="o">.</span><span class="n">view</span><span class="p">(</span><span class="n">n</span><span class="p">,</span><span class="o">-</span><span class="mi">1</span><span class="p">)</span>
+    <span class="n">targs</span> <span class="o">=</span> <span class="n">targs</span><span class="o">.</span><span class="n">view</span><span class="p">(</span><span class="n">n</span><span class="p">,</span><span class="o">-</span><span class="mi">1</span><span class="p">)</span>
+    <span class="k">return</span> <span class="p">(</span><span class="nb">input</span><span class="p">[</span><span class="n">targs</span> <span class="o">&gt;</span> <span class="mi">3</span><span class="p">]</span> <span class="o">==</span> <span class="n">targs</span><span class="p">[</span><span class="n">targs</span> <span class="o">&gt;</span> <span class="mi">3</span><span class="p">])</span><span class="o">.</span><span class="n">float</span><span class="p">()</span><span class="o">.</span><span class="n">mean</span><span class="p">()</span></div>
+
+<div class="viewcode-block" id="decoder"><a class="viewcode-back" href="../../desmiles.html#desmiles.utils.decoder">[docs]</a><span class="k">def</span> <span class="nf">decoder</span><span class="p">(</span><span class="n">idx_vec</span><span class="p">,</span> <span class="n">itos</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Return a SMILES string from an index vector (deals with reversal)&quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">idx_vec</span><span class="p">)</span> <span class="o">&lt;</span> <span class="mi">2</span><span class="p">:</span>
+        <span class="k">return</span> <span class="s2">&quot;&quot;</span>
+    <span class="k">if</span> <span class="n">idx_vec</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="o">==</span> <span class="mi">1</span><span class="p">:</span>  <span class="c1"># SMILES string is in fwd direction</span>
+        <span class="k">return</span> <span class="s1">&#39;&#39;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">itos</span><span class="p">[</span><span class="n">x</span><span class="p">]</span> <span class="k">for</span> <span class="n">x</span> <span class="ow">in</span> <span class="n">idx_vec</span> <span class="k">if</span> <span class="n">x</span> <span class="o">&gt;</span> <span class="mi">3</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">idx_vec</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="o">==</span> <span class="mi">2</span><span class="p">:</span>  <span class="c1"># SMILES string is in bwd direction</span>
+        <span class="k">return</span> <span class="s1">&#39;&#39;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">itos</span><span class="p">[</span><span class="n">x</span><span class="p">]</span> <span class="k">for</span> <span class="n">x</span> <span class="ow">in</span> <span class="n">idx_vec</span><span class="p">[::</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span> <span class="k">if</span> <span class="n">x</span> <span class="o">&gt;</span> <span class="mi">3</span><span class="p">)</span>
+    <span class="k">else</span><span class="p">:</span> <span class="c1"># don&#39;t know how to deal with it---do your best</span>
+        <span class="k">return</span> <span class="s1">&#39;&#39;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">itos</span><span class="p">[</span><span class="n">x</span><span class="p">]</span> <span class="k">for</span> <span class="n">x</span> <span class="ow">in</span> <span class="n">idx_vec</span> <span class="k">if</span> <span class="n">x</span> <span class="o">&gt;</span> <span class="mi">3</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="get_default_decoder"><a class="viewcode-back" href="../../desmiles.html#desmiles.utils.get_default_decoder">[docs]</a><span class="k">def</span> <span class="nf">get_default_decoder</span><span class="p">():</span>
+    <span class="kn">from</span> <span class="nn">functools</span> <span class="kn">import</span> <span class="n">partial</span>
+    <span class="n">itos_fn</span><span class="o">=</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">DATA_DIR</span><span class="p">,</span> <span class="s1">&#39;pretrained&#39;</span><span class="p">,</span> <span class="s1">&#39;id.dec8000&#39;</span><span class="p">)</span>
+    <span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="n">itos_fn</span><span class="p">,</span> <span class="n">encoding</span><span class="o">=</span><span class="s1">&#39;utf-8&#39;</span><span class="p">)</span> <span class="k">as</span> <span class="n">itos_file</span><span class="p">:</span>
+        <span class="n">itos</span> <span class="o">=</span> <span class="p">[</span><span class="n">s</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span> <span class="k">for</span> <span class="n">i</span><span class="p">,</span><span class="n">s</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">itos_file</span><span class="p">)]</span>
+    <span class="k">return</span> <span class="n">partial</span><span class="p">(</span><span class="n">decoder</span><span class="p">,</span> <span class="n">itos</span><span class="o">=</span><span class="n">itos</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="smiles_idx_to_string"><a class="viewcode-back" href="../../desmiles.html#desmiles.utils.smiles_idx_to_string">[docs]</a><span class="k">def</span> <span class="nf">smiles_idx_to_string</span><span class="p">(</span><span class="n">smiles_idx</span><span class="p">,</span> <span class="n">decoder</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+    <span class="k">if</span> <span class="n">decoder</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">decoder</span> <span class="o">=</span> <span class="n">get_default_decoder</span><span class="p">()</span>
+    <span class="k">return</span> <span class="n">decoder</span><span class="p">(</span><span class="n">smiles_idx</span><span class="p">[</span><span class="n">smiles_idx</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">tolist</span><span class="p">())</span></div>
+</pre></div>
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2018, 2019, 2020, D. E. Shaw Research.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

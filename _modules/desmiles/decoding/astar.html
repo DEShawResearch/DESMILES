@@ -1,0 +1,605 @@
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" >
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>desmiles.decoding.astar &mdash; desmiles  documentation</title>
+      <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
+      <link rel="stylesheet" href="../../../_static/css/theme.css" type="text/css" />
+  <!--[if lt IE 9]>
+    <script src="../../../_static/js/html5shiv.min.js"></script>
+  <![endif]-->
+  
+        <script data-url_root="../../../" id="documentation_options" src="../../../_static/documentation_options.js"></script>
+        <script src="../../../_static/jquery.js"></script>
+        <script src="../../../_static/underscore.js"></script>
+        <script src="../../../_static/doctools.js"></script>
+    <script src="../../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+            <a href="../../../index.html" class="icon icon-home"> desmiles
+          </a>
+              <div class="version">
+                BETA
+              </div>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../desmiles.html">Usage</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../release-notes.html">Release notes</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../issues.html">Open issues</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../../index.html">desmiles</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../../index.html" class="icon icon-home"></a> &raquo;</li>
+          <li><a href="../../index.html">Module code</a> &raquo;</li>
+      <li>desmiles.decoding.astar</li>
+      <li class="wy-breadcrumbs-aside">
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <h1>Source code for desmiles.decoding.astar</h1><div class="highlight"><pre>
+<span></span><span class="kn">import</span> <span class="nn">torch</span>
+<span class="kn">import</span> <span class="nn">torch.nn.functional</span> <span class="k">as</span> <span class="nn">F</span>
+<span class="kn">import</span> <span class="nn">queue</span>
+<span class="kn">from</span> <span class="nn">itertools</span> <span class="kn">import</span> <span class="n">count</span>
+<span class="kn">import</span> <span class="nn">numpy</span> <span class="k">as</span> <span class="nn">np</span>
+<span class="kn">from</span> <span class="nn">..models</span> <span class="kn">import</span> <span class="n">RecurrentDESMILES</span>
+
+<div class="viewcode-block" id="AstarTree"><a class="viewcode-back" href="../../../desmiles.html#desmiles.decoding.astar.AstarTree">[docs]</a><span class="k">class</span> <span class="nc">AstarTree</span><span class="p">:</span>
+    <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">fp</span><span class="p">,</span> <span class="n">desmiles</span><span class="p">,</span> <span class="n">max_length</span><span class="o">=</span><span class="mi">30</span><span class="p">,</span> <span class="n">max_branches</span><span class="o">=</span><span class="mi">5000</span><span class="p">):</span>
+        <span class="k">assert</span> <span class="nb">type</span><span class="p">(</span><span class="n">fp</span><span class="p">)</span> <span class="ow">is</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span>
+        <span class="k">assert</span> <span class="nb">type</span><span class="p">(</span><span class="n">desmiles</span><span class="p">)</span> <span class="ow">is</span> <span class="n">RecurrentDESMILES</span>
+        <span class="k">assert</span> <span class="nb">next</span><span class="p">(</span><span class="n">desmiles</span><span class="o">.</span><span class="n">parameters</span><span class="p">())</span><span class="o">.</span><span class="n">device</span> <span class="o">==</span> <span class="n">fp</span><span class="o">.</span><span class="n">device</span>
+        <span class="k">if</span> <span class="n">fp</span><span class="o">.</span><span class="n">dim</span><span class="p">()</span> <span class="o">==</span> <span class="mi">1</span><span class="p">:</span>
+            <span class="n">fp</span> <span class="o">=</span> <span class="n">fp</span><span class="o">.</span><span class="n">unsqueeze</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">fp</span> <span class="o">=</span> <span class="n">fp</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">desmiles</span> <span class="o">=</span> <span class="n">desmiles</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">max_length</span> <span class="o">=</span> <span class="n">max_length</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">max_branches</span> <span class="o">=</span> <span class="n">max_branches</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">device</span> <span class="o">=</span> <span class="s2">&quot;cuda&quot;</span> <span class="k">if</span> <span class="n">torch</span><span class="o">.</span><span class="n">cuda</span><span class="o">.</span><span class="n">is_available</span><span class="p">()</span> <span class="k">else</span> <span class="s2">&quot;cpu&quot;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">unique_identifier</span> <span class="o">=</span> <span class="n">count</span><span class="p">()</span> <span class="c1"># counter breaks ties between equivalent probabilities</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">non_leaf_queue</span> <span class="o">=</span> <span class="n">queue</span><span class="o">.</span><span class="n">PriorityQueue</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">leaf_queue</span> <span class="o">=</span> <span class="n">queue</span><span class="o">.</span><span class="n">PriorityQueue</span><span class="p">()</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">desmiles</span><span class="o">.</span><span class="n">embed_fingerprints</span><span class="p">(</span><span class="n">fp</span><span class="p">)</span> <span class="c1"># initialize rnn_desmiles by embedding the fingerprint</span>
+        <span class="n">root</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">initialize_root_node</span><span class="p">()</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">non_leaf_queue</span><span class="o">.</span><span class="n">put</span><span class="p">((</span><span class="n">torch</span><span class="o">.</span><span class="n">tensor</span><span class="p">(</span><span class="mf">0.0</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">device</span><span class="p">),</span> <span class="nb">next</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">unique_identifier</span><span class="p">),</span> <span class="n">root</span><span class="p">))</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">leaf_queue</span><span class="o">.</span><span class="n">put</span><span class="p">((</span><span class="n">torch</span><span class="o">.</span><span class="n">tensor</span><span class="p">(</span><span class="nb">float</span><span class="p">(</span><span class="s2">&quot;inf&quot;</span><span class="p">),</span> <span class="n">device</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">device</span><span class="p">),</span> <span class="nb">next</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">unique_identifier</span><span class="p">),</span> <span class="n">root</span><span class="p">))</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">num_expand</span> <span class="o">=</span> <span class="mi">1</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">num_branches</span> <span class="o">=</span> <span class="mi">0</span>
+
+
+<div class="viewcode-block" id="AstarTree.create_from_astar_tree"><a class="viewcode-back" href="../../../desmiles.html#desmiles.decoding.astar.AstarTree.create_from_astar_tree">[docs]</a>    <span class="nd">@classmethod</span>
+    <span class="k">def</span> <span class="nf">create_from_astar_tree</span><span class="p">(</span><span class="bp">cls</span><span class="p">,</span> <span class="n">other</span><span class="p">):</span>
+        <span class="n">astar_tree</span> <span class="o">=</span> <span class="bp">cls</span><span class="p">(</span><span class="n">other</span><span class="o">.</span><span class="n">fp</span><span class="p">,</span> <span class="n">other</span><span class="o">.</span><span class="n">desmiles</span><span class="p">,</span> <span class="n">max_length</span><span class="o">=</span><span class="n">other</span><span class="o">.</span><span class="n">max_length</span><span class="p">,</span> <span class="n">max_branches</span><span class="o">=</span><span class="n">other</span><span class="o">.</span><span class="n">max_branches</span><span class="p">)</span>
+        <span class="n">astar_tree</span><span class="o">.</span><span class="n">non_leaf_queue</span> <span class="o">=</span> <span class="n">other</span><span class="o">.</span><span class="n">non_leaf_queue</span>
+        <span class="n">astar_tree</span><span class="o">.</span><span class="n">leaf_queue</span> <span class="o">=</span> <span class="n">other</span><span class="o">.</span><span class="n">leaf_queue</span>
+        <span class="k">return</span> <span class="n">astar_tree</span></div>
+
+<div class="viewcode-block" id="AstarTree.initialize_root_node"><a class="viewcode-back" href="../../../desmiles.html#desmiles.decoding.astar.AstarTree.initialize_root_node">[docs]</a>    <span class="k">def</span> <span class="nf">initialize_root_node</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="n">root</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">max_length</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">long</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">device</span><span class="p">)</span>
+        <span class="n">root</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">=</span> <span class="mi">3</span>
+        <span class="k">return</span> <span class="n">root</span></div>
+
+<div class="viewcode-block" id="AstarTree.return_leaf_node"><a class="viewcode-back" href="../../../desmiles.html#desmiles.decoding.astar.AstarTree.return_leaf_node">[docs]</a>    <span class="k">def</span> <span class="nf">return_leaf_node</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="n">score</span><span class="p">,</span> <span class="n">_</span><span class="p">,</span> <span class="n">seq</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">leaf_queue</span><span class="o">.</span><span class="n">get</span><span class="p">()</span>  <span class="c1"># pop the top, decode and yield.</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">last_leaf_node</span> <span class="o">=</span> <span class="n">seq</span>
+        <span class="k">return</span> <span class="n">score</span><span class="p">,</span> <span class="n">seq</span></div>
+
+    <span class="k">def</span> <span class="fm">__next__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="c1"># If no more room for expansion</span>
+        <span class="k">while</span> <span class="kc">True</span><span class="p">:</span>
+            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">num_branches</span> <span class="o">&gt;</span> <span class="bp">self</span><span class="o">.</span><span class="n">max_branches</span><span class="p">:</span>
+                <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">leaf_queue</span><span class="o">.</span><span class="n">qsize</span><span class="p">()</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">:</span>
+                    <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">return_leaf_node</span><span class="p">()</span>
+                <span class="k">else</span><span class="p">:</span>
+                    <span class="k">return</span> <span class="n">np</span><span class="o">.</span><span class="n">inf</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">last_leaf_node</span>
+            <span class="c1"># Return a leaf node if it has the best score</span>
+            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">leaf_queue</span><span class="o">.</span><span class="n">queue</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="mi">0</span><span class="p">]</span> <span class="o">&lt;</span> <span class="bp">self</span><span class="o">.</span><span class="n">non_leaf_queue</span><span class="o">.</span><span class="n">queue</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="mi">0</span><span class="p">]:</span>
+                <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">return_leaf_node</span><span class="p">()</span>
+            <span class="c1"># Otherwise, purge queue and branch</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">purge_queue</span><span class="p">()</span> <span class="c1"># purge non-leaf queue if necessary</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">branch_and_bound</span><span class="p">()</span>
+
+<div class="viewcode-block" id="AstarTree.branch_and_bound"><a class="viewcode-back" href="../../../desmiles.html#desmiles.decoding.astar.AstarTree.branch_and_bound">[docs]</a>    <span class="k">def</span> <span class="nf">branch_and_bound</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="c1"># get nodes to expand</span>
+        <span class="n">seqs</span><span class="p">,</span> <span class="n">scores</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">branch</span><span class="p">()</span>
+        <span class="c1">#seqs, scores = self.post_branch_callback(seqs, scores)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">bound</span><span class="p">(</span><span class="n">seqs</span><span class="p">,</span> <span class="n">scores</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">num_branches</span> <span class="o">+=</span> <span class="mi">1</span></div>
+
+
+<div class="viewcode-block" id="AstarTree.branch"><a class="viewcode-back" href="../../../desmiles.html#desmiles.decoding.astar.AstarTree.branch">[docs]</a>    <span class="k">def</span> <span class="nf">branch</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="c1"># Create scores and sequences for the num_expand nodes we will expand</span>
+        <span class="c1"># it doesn&#39;t actually do the branching.</span>
+        <span class="n">scores</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="n">seqs</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="n">num_nodes</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">non_leaf_queue</span><span class="o">.</span><span class="n">qsize</span><span class="p">()</span>
+        <span class="k">while</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">scores</span><span class="p">)</span> <span class="o">&lt;</span> <span class="nb">min</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">num_expand</span><span class="p">,</span> <span class="n">num_nodes</span><span class="p">)):</span>
+            <span class="n">score</span><span class="p">,</span> <span class="n">_</span><span class="p">,</span> <span class="n">seq</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">non_leaf_queue</span><span class="o">.</span><span class="n">get</span><span class="p">()</span>
+            <span class="n">scores</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">score</span><span class="p">)</span>
+            <span class="n">seqs</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">seq</span><span class="p">)</span>
+        <span class="n">scores</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">tensor</span><span class="p">(</span><span class="n">scores</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">device</span><span class="p">)</span>
+        <span class="n">seqs</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">stack</span><span class="p">(</span><span class="n">seqs</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">seqs</span><span class="p">,</span> <span class="n">scores</span></div>
+
+<div class="viewcode-block" id="AstarTree.bound"><a class="viewcode-back" href="../../../desmiles.html#desmiles.decoding.astar.AstarTree.bound">[docs]</a>    <span class="k">def</span> <span class="nf">bound</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">seqs</span><span class="p">,</span> <span class="n">scores</span><span class="p">):</span>
+        <span class="c1"># Perform the branch operation and then bound the results:</span>
+        <span class="k">with</span> <span class="n">torch</span><span class="o">.</span><span class="n">no_grad</span><span class="p">():</span>
+            <span class="c1"># Clone hidden states which are the embedded fingerprints only.</span>
+            <span class="c1"># This only needs as argument the len(seqs) [or seq.shape[0]]</span>
+            <span class="n">hiddens</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">clone_hidden_states</span><span class="p">(</span><span class="n">seqs</span><span class="p">)</span>
+            <span class="c1"># Get the probabilities for all the children</span>
+            <span class="c1"># The call to get_log_probabilities will overwrite the hidden states based on the sequences.</span>
+            <span class="n">log_probs</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_log_probabilities</span><span class="p">(</span><span class="n">seqs</span><span class="p">)</span>
+            <span class="c1"># reset the hidden states to those of the embedded fingerprints.</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">desmiles</span><span class="o">.</span><span class="n">hiddens</span> <span class="o">=</span> <span class="n">hiddens</span>
+            <span class="n">seqs</span><span class="p">,</span> <span class="n">scores</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_children</span><span class="p">(</span><span class="n">seqs</span><span class="p">,</span> <span class="n">log_probs</span><span class="p">,</span> <span class="n">scores</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">add_children_to_queue</span><span class="p">(</span><span class="n">seqs</span><span class="p">,</span> <span class="n">scores</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="AstarTree.add_children_to_queue"><a class="viewcode-back" href="../../../desmiles.html#desmiles.decoding.astar.AstarTree.add_children_to_queue">[docs]</a>    <span class="k">def</span> <span class="nf">add_children_to_queue</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">seqs</span><span class="p">,</span> <span class="n">scores</span><span class="p">):</span>
+        <span class="c1"># sort scores and grab the first max_branches to add to the two separate queues.</span>
+        <span class="n">sort_idx</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">sort_scores</span><span class="p">(</span><span class="n">scores</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">max_branches</span><span class="p">)</span>
+        <span class="n">scores</span> <span class="o">=</span> <span class="n">scores</span><span class="p">[</span><span class="n">sort_idx</span><span class="p">]</span>
+        <span class="n">seqs</span> <span class="o">=</span> <span class="n">seqs</span><span class="p">[</span><span class="n">sort_idx</span><span class="p">]</span>  <span class="c1"># this is a 2D tensor with dimensions: (8000 x num_expanded_children) x 30 (padded sequences)</span>
+        <span class="n">is_leaf_node</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">are_children_leaf_nodes</span><span class="p">(</span><span class="n">seqs</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="p">(</span><span class="n">score</span><span class="p">,</span> <span class="n">child</span><span class="p">)</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="nb">zip</span><span class="p">(</span><span class="n">scores</span><span class="p">[</span><span class="n">is_leaf_node</span><span class="p">]</span><span class="o">.</span><span class="n">tolist</span><span class="p">(),</span> <span class="n">seqs</span><span class="p">[</span><span class="n">is_leaf_node</span><span class="p">])):</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">leaf_queue</span><span class="o">.</span><span class="n">put</span><span class="p">((</span><span class="n">score</span><span class="p">,</span> <span class="nb">next</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">unique_identifier</span><span class="p">),</span> <span class="n">child</span><span class="p">))</span>
+        <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="p">(</span><span class="n">score</span><span class="p">,</span> <span class="n">child</span><span class="p">)</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="nb">zip</span><span class="p">(</span><span class="n">scores</span><span class="p">[</span><span class="o">~</span><span class="n">is_leaf_node</span><span class="p">]</span><span class="o">.</span><span class="n">tolist</span><span class="p">(),</span> <span class="n">seqs</span><span class="p">[</span><span class="o">~</span><span class="n">is_leaf_node</span><span class="p">])):</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">non_leaf_queue</span><span class="o">.</span><span class="n">put</span><span class="p">((</span><span class="n">score</span><span class="p">,</span> <span class="nb">next</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">unique_identifier</span><span class="p">),</span> <span class="n">child</span><span class="p">))</span></div>
+
+<div class="viewcode-block" id="AstarTree.are_children_leaf_nodes"><a class="viewcode-back" href="../../../desmiles.html#desmiles.decoding.astar.AstarTree.are_children_leaf_nodes">[docs]</a>    <span class="k">def</span> <span class="nf">are_children_leaf_nodes</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">children</span><span class="p">):</span>
+        <span class="c1"># the -1 is a hack for using the index in the last_chars line.  Could revert back to actual legths.</span>
+        <span class="n">lengths</span> <span class="o">=</span> <span class="p">(</span><span class="n">children</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">)</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">dim</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span> <span class="o">-</span> <span class="mi">1</span>
+        <span class="n">last_chars</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">tensor</span><span class="p">([</span><span class="n">child</span><span class="p">[</span><span class="n">length</span><span class="p">]</span> <span class="k">for</span> <span class="n">child</span><span class="p">,</span> <span class="n">length</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">children</span><span class="p">,</span> <span class="n">lengths</span><span class="p">)],</span> <span class="n">device</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">device</span><span class="p">)</span>
+        <span class="c1"># last_chars == 0 means a pad character was chosen. for now I call this a leaf node so that it is not expanded further</span>
+        <span class="c1"># The special characters are hard coded here:</span>
+        <span class="n">last_char_is_stop</span> <span class="o">=</span> <span class="p">(</span><span class="n">last_chars</span> <span class="o">==</span> <span class="mi">1</span><span class="p">)</span> <span class="o">|</span> <span class="p">(</span><span class="n">last_chars</span> <span class="o">==</span> <span class="mi">2</span><span class="p">)</span> <span class="o">|</span> <span class="p">(</span><span class="n">last_chars</span> <span class="o">==</span> <span class="mi">0</span><span class="p">)</span>
+        <span class="c1"># this leaf node check only runs up to 30 elements, hardcoded (differs from earlier leaf_node check).</span>
+        <span class="n">is_leaf_node</span> <span class="o">=</span> <span class="p">(((</span><span class="n">lengths</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mi">3</span><span class="p">)</span> <span class="o">&amp;</span> <span class="n">last_char_is_stop</span><span class="p">)</span> <span class="o">|</span> <span class="p">((</span><span class="n">lengths</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span> <span class="o">==</span> <span class="mi">30</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">is_leaf_node</span></div>
+
+<div class="viewcode-block" id="AstarTree.sort_scores"><a class="viewcode-back" href="../../../desmiles.html#desmiles.decoding.astar.AstarTree.sort_scores">[docs]</a>    <span class="nd">@staticmethod</span>
+    <span class="k">def</span> <span class="nf">sort_scores</span><span class="p">(</span><span class="n">scores</span><span class="p">,</span> <span class="n">max_branches</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">torch</span><span class="o">.</span><span class="n">sort</span><span class="p">(</span><span class="n">scores</span><span class="p">)[</span><span class="mi">1</span><span class="p">][:</span><span class="n">max_branches</span><span class="p">]</span></div>
+
+<div class="viewcode-block" id="AstarTree.get_children"><a class="viewcode-back" href="../../../desmiles.html#desmiles.decoding.astar.AstarTree.get_children">[docs]</a>    <span class="k">def</span> <span class="nf">get_children</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">seqs</span><span class="p">,</span> <span class="n">log_probs</span><span class="p">,</span> <span class="n">parent_nlps</span><span class="p">):</span>
+        <span class="n">lengths</span> <span class="o">=</span> <span class="p">(</span><span class="n">seqs</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">)</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">dim</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+        <span class="n">children</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="n">log_probs</span><span class="o">.</span><span class="n">size</span><span class="p">(</span><span class="mi">1</span><span class="p">),</span> <span class="n">device</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">device</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">long</span><span class="p">)[</span><span class="kc">None</span><span class="p">,:]</span><span class="o">.</span><span class="n">expand</span><span class="p">(</span><span class="n">seqs</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="n">log_probs</span><span class="o">.</span><span class="n">size</span><span class="p">(</span><span class="mi">1</span><span class="p">))</span>
+        <span class="n">new_seqs</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="k">for</span> <span class="n">seq</span><span class="p">,</span> <span class="n">child</span><span class="p">,</span> <span class="n">length</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">seqs</span><span class="p">,</span> <span class="n">children</span><span class="p">,</span> <span class="n">lengths</span><span class="p">):</span>
+            <span class="n">seq</span> <span class="o">=</span> <span class="n">seq</span><span class="o">.</span><span class="n">expand</span><span class="p">(</span><span class="n">child</span><span class="o">.</span><span class="n">size</span><span class="p">(</span><span class="mi">0</span><span class="p">),</span> <span class="n">seq</span><span class="o">.</span><span class="n">size</span><span class="p">(</span><span class="mi">0</span><span class="p">))</span>
+            <span class="n">seq</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">cat</span><span class="p">((</span><span class="n">seq</span><span class="p">[:,:</span><span class="n">length</span><span class="p">],</span> <span class="n">child</span><span class="p">[:,</span><span class="kc">None</span><span class="p">],</span> <span class="n">seq</span><span class="p">[:,</span><span class="n">length</span><span class="p">:</span><span class="o">-</span><span class="mi">1</span><span class="p">]),</span> <span class="n">dim</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+            <span class="n">new_seqs</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">seq</span><span class="p">)</span>
+        <span class="n">new_seqs</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">stack</span><span class="p">(</span><span class="n">new_seqs</span><span class="p">)</span>
+        <span class="n">new_seqs</span> <span class="o">=</span> <span class="n">new_seqs</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">,</span> <span class="n">new_seqs</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">])</span>
+        <span class="n">scores</span> <span class="o">=</span> <span class="p">(</span><span class="n">parent_nlps</span><span class="p">[:,</span><span class="kc">None</span><span class="p">]</span> <span class="o">-</span> <span class="n">log_probs</span><span class="p">)</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">new_seqs</span><span class="p">,</span> <span class="n">scores</span></div>
+    
+<div class="viewcode-block" id="AstarTree.clone_hidden_states"><a class="viewcode-back" href="../../../desmiles.html#desmiles.decoding.astar.AstarTree.clone_hidden_states">[docs]</a>    <span class="k">def</span> <span class="nf">clone_hidden_states</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">seqs</span><span class="p">):</span>
+        <span class="n">num_sequences</span> <span class="o">=</span> <span class="n">seqs</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+        <span class="k">if</span> <span class="n">num_sequences</span> <span class="o">!=</span> <span class="bp">self</span><span class="o">.</span><span class="n">desmiles</span><span class="o">.</span><span class="n">bs</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">desmiles</span><span class="o">.</span><span class="n">select_hidden</span><span class="p">(</span><span class="n">torch</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span><span class="n">num_sequences</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">long</span><span class="p">))</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">desmiles</span><span class="o">.</span><span class="n">bs</span> <span class="o">=</span> <span class="n">num_sequences</span>
+        <span class="n">hiddens</span> <span class="o">=</span> <span class="p">[(</span><span class="n">h</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">clone</span><span class="p">(),</span><span class="n">h</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">clone</span><span class="p">())</span> <span class="k">for</span> <span class="n">h</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">desmiles</span><span class="o">.</span><span class="n">hiddens</span><span class="p">]</span>
+        <span class="k">return</span> <span class="n">hiddens</span></div>
+
+<div class="viewcode-block" id="AstarTree.get_log_probabilities"><a class="viewcode-back" href="../../../desmiles.html#desmiles.decoding.astar.AstarTree.get_log_probabilities">[docs]</a>    <span class="k">def</span> <span class="nf">get_log_probabilities</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">seqs</span><span class="p">):</span>
+        <span class="n">logits</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">desmiles</span><span class="p">(</span><span class="n">seqs</span><span class="o">.</span><span class="n">transpose</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span><span class="mi">1</span><span class="p">))</span>
+        <span class="n">lengths</span> <span class="o">=</span> <span class="p">(</span><span class="n">seqs</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">)</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">dim</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span> <span class="o">-</span> <span class="mi">1</span>
+        <span class="c1"># get the energy corresponding to the next token (specified by lengths)</span>
+        <span class="n">logits</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">stack</span><span class="p">([</span><span class="n">logits</span><span class="p">[</span><span class="n">i</span><span class="p">,</span><span class="n">l</span><span class="p">]</span> <span class="k">for</span> <span class="n">i</span><span class="p">,</span><span class="n">l</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="n">lengths</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">]),</span> <span class="n">lengths</span><span class="o">.</span><span class="n">tolist</span><span class="p">())])</span>
+        <span class="k">assert</span><span class="p">(</span><span class="n">logits</span><span class="o">.</span><span class="n">dim</span><span class="p">()</span> <span class="o">==</span> <span class="mi">2</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">F</span><span class="o">.</span><span class="n">log_softmax</span><span class="p">(</span><span class="n">logits</span><span class="p">,</span> <span class="n">dim</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="AstarTree.purge_queue"><a class="viewcode-back" href="../../../desmiles.html#desmiles.decoding.astar.AstarTree.purge_queue">[docs]</a>    <span class="k">def</span> <span class="nf">purge_queue</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">downto</span><span class="o">=</span><span class="mi">10000</span><span class="p">,</span> <span class="n">maxsize</span><span class="o">=</span><span class="mi">1000000</span><span class="p">):</span>  <span class="c1">## will need to update to also keep mol_queue mols.</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">non_leaf_queue</span><span class="o">.</span><span class="n">qsize</span><span class="p">()</span> <span class="o">&gt;</span> <span class="n">maxsize</span><span class="p">:</span>
+            <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;PURGING&quot;</span><span class="p">)</span>
+            <span class="n">q2</span> <span class="o">=</span> <span class="n">queue</span><span class="o">.</span><span class="n">PriorityQueue</span><span class="p">()</span>
+            <span class="c1">## Get top elements into new queue</span>
+            <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">downto</span><span class="p">):</span>
+                <span class="n">q2</span><span class="o">.</span><span class="n">put</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">non_leaf_queue</span><span class="o">.</span><span class="n">get</span><span class="p">())</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">non_leaf_queue</span> <span class="o">=</span> <span class="n">q2</span></div></div>
+
+
+<div class="viewcode-block" id="AstarTreeParallel"><a class="viewcode-back" href="../../../desmiles.html#desmiles.decoding.astar.AstarTreeParallel">[docs]</a><span class="k">class</span> <span class="nc">AstarTreeParallel</span><span class="p">(</span><span class="n">AstarTree</span><span class="p">):</span>
+    <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">fp</span><span class="p">,</span> <span class="n">desmiles</span><span class="p">,</span> <span class="n">max_length</span><span class="o">=</span><span class="mi">30</span><span class="p">,</span> <span class="n">max_branches</span><span class="o">=</span><span class="mi">5000</span><span class="p">,</span> <span class="n">num_expand</span><span class="o">=</span><span class="mi">1</span><span class="p">):</span>
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span><span class="n">fp</span><span class="p">,</span> <span class="n">desmiles</span><span class="p">,</span> <span class="n">max_length</span><span class="o">=</span><span class="mi">30</span><span class="p">,</span> <span class="n">max_branches</span><span class="o">=</span><span class="mi">5000</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">num_expand</span> <span class="o">=</span> <span class="n">num_expand</span>
+
+<div class="viewcode-block" id="AstarTreeParallel.branch"><a class="viewcode-back" href="../../../desmiles.html#desmiles.decoding.astar.AstarTreeParallel.branch">[docs]</a>    <span class="k">def</span> <span class="nf">branch</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="n">seqs</span><span class="p">,</span> <span class="n">scores</span> <span class="o">=</span> <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="n">branch</span><span class="p">()</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">sort_by_length</span><span class="p">(</span><span class="n">seqs</span><span class="p">,</span> <span class="n">scores</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="AstarTreeParallel.sort_by_length"><a class="viewcode-back" href="../../../desmiles.html#desmiles.decoding.astar.AstarTreeParallel.sort_by_length">[docs]</a>    <span class="nd">@staticmethod</span>
+    <span class="k">def</span> <span class="nf">sort_by_length</span><span class="p">(</span><span class="n">seqs</span><span class="p">,</span> <span class="n">scores</span><span class="p">):</span>
+        <span class="n">lengths</span> <span class="o">=</span> <span class="p">(</span><span class="n">seqs</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">)</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">dim</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+        <span class="n">length_idx</span> <span class="o">=</span> <span class="n">AstarTreeParallel</span><span class="o">.</span><span class="n">sort_lengths</span><span class="p">(</span><span class="n">lengths</span><span class="p">)</span>
+        <span class="n">seqs</span> <span class="o">=</span> <span class="n">seqs</span><span class="p">[</span><span class="n">length_idx</span><span class="p">]</span>
+        <span class="n">scores</span> <span class="o">=</span> <span class="n">scores</span><span class="p">[</span><span class="n">length_idx</span><span class="p">]</span>
+        <span class="k">return</span> <span class="n">seqs</span><span class="p">,</span> <span class="n">scores</span></div>
+
+<div class="viewcode-block" id="AstarTreeParallel.sort_lengths"><a class="viewcode-back" href="../../../desmiles.html#desmiles.decoding.astar.AstarTreeParallel.sort_lengths">[docs]</a>    <span class="nd">@staticmethod</span>
+    <span class="k">def</span> <span class="nf">sort_lengths</span><span class="p">(</span><span class="n">lengths</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">torch</span><span class="o">.</span><span class="n">sort</span><span class="p">(</span><span class="o">-</span><span class="n">lengths</span><span class="p">)[</span><span class="mi">1</span><span class="p">]</span></div></div>
+
+
+
+<div class="viewcode-block" id="AstarTreeParallelNotSafe"><a class="viewcode-back" href="../../../desmiles.html#desmiles.decoding.astar.AstarTreeParallelNotSafe">[docs]</a><span class="k">class</span> <span class="nc">AstarTreeParallelNotSafe</span><span class="p">:</span>
+    <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">fp</span><span class="p">,</span> <span class="n">desmiles</span><span class="p">,</span> <span class="n">max_length</span><span class="o">=</span><span class="mi">30</span><span class="p">,</span> <span class="n">max_branches</span><span class="o">=</span><span class="mi">5000</span><span class="p">,</span> <span class="n">num_expand</span><span class="o">=</span><span class="mi">1</span><span class="p">):</span>
+        <span class="k">assert</span> <span class="nb">type</span><span class="p">(</span><span class="n">fp</span><span class="p">)</span> <span class="ow">is</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span>
+        <span class="k">assert</span> <span class="nb">type</span><span class="p">(</span><span class="n">desmiles</span><span class="p">)</span> <span class="ow">is</span> <span class="n">RecurrentDESMILES</span>
+        <span class="k">assert</span> <span class="nb">next</span><span class="p">(</span><span class="n">desmiles</span><span class="o">.</span><span class="n">parameters</span><span class="p">())</span><span class="o">.</span><span class="n">device</span> <span class="o">==</span> <span class="n">fp</span><span class="o">.</span><span class="n">device</span>
+        <span class="k">if</span> <span class="n">fp</span><span class="o">.</span><span class="n">dim</span><span class="p">()</span> <span class="o">==</span> <span class="mi">1</span><span class="p">:</span>
+            <span class="n">fp</span> <span class="o">=</span> <span class="n">fp</span><span class="o">.</span><span class="n">unsqueeze</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">fp</span> <span class="o">=</span> <span class="n">fp</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">desmiles</span> <span class="o">=</span> <span class="n">desmiles</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">max_length</span> <span class="o">=</span> <span class="n">max_length</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">max_branches</span> <span class="o">=</span> <span class="n">max_branches</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">device</span> <span class="o">=</span> <span class="s2">&quot;cuda&quot;</span> <span class="k">if</span> <span class="n">torch</span><span class="o">.</span><span class="n">cuda</span><span class="o">.</span><span class="n">is_available</span><span class="p">()</span> <span class="k">else</span> <span class="s2">&quot;cpu&quot;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">unique_identifier</span> <span class="o">=</span> <span class="n">count</span><span class="p">()</span> <span class="c1"># counter breaks ties between equivalent probabilities</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">non_leaf_queue</span> <span class="o">=</span> <span class="n">queue</span><span class="o">.</span><span class="n">PriorityQueue</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">leaf_queue</span> <span class="o">=</span> <span class="n">queue</span><span class="o">.</span><span class="n">PriorityQueue</span><span class="p">()</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">desmiles</span><span class="o">.</span><span class="n">embed_fingerprints</span><span class="p">(</span><span class="n">fp</span><span class="p">)</span> <span class="c1"># initialize rnn_desmiles by embedding the fingerprint</span>
+        <span class="n">root</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">initialize_root_node</span><span class="p">()</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">non_leaf_queue</span><span class="o">.</span><span class="n">put</span><span class="p">((</span><span class="n">torch</span><span class="o">.</span><span class="n">tensor</span><span class="p">(</span><span class="mf">0.0</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">device</span><span class="p">),</span> <span class="nb">next</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">unique_identifier</span><span class="p">),</span> <span class="n">root</span><span class="p">))</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">leaf_queue</span><span class="o">.</span><span class="n">put</span><span class="p">((</span><span class="n">torch</span><span class="o">.</span><span class="n">tensor</span><span class="p">(</span><span class="nb">float</span><span class="p">(</span><span class="s2">&quot;inf&quot;</span><span class="p">),</span> <span class="n">device</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">device</span><span class="p">),</span> <span class="nb">next</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">unique_identifier</span><span class="p">),</span> <span class="n">root</span><span class="p">))</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">num_expand</span> <span class="o">=</span> <span class="mi">1</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">num_expand</span> <span class="o">=</span> <span class="n">num_expand</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">node_to_hiddens</span> <span class="o">=</span> <span class="p">{}</span>
+        <span class="n">score</span><span class="p">,</span> <span class="n">ident</span><span class="p">,</span> <span class="n">root</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">non_leaf_queue</span><span class="o">.</span><span class="n">get</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">node_to_hiddens</span><span class="p">[</span><span class="n">root</span><span class="p">]</span> <span class="o">=</span> <span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">clone_hiddens</span><span class="p">(),</span> <span class="mi">0</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">non_leaf_queue</span><span class="o">.</span><span class="n">put</span><span class="p">((</span><span class="n">score</span><span class="p">,</span> <span class="n">ident</span><span class="p">,</span> <span class="n">root</span><span class="p">))</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">num_expand</span> <span class="o">=</span> <span class="n">num_expand</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">num_branches</span> <span class="o">=</span> <span class="mi">0</span>
+
+<div class="viewcode-block" id="AstarTreeParallelNotSafe.initialize_root_node"><a class="viewcode-back" href="../../../desmiles.html#desmiles.decoding.astar.AstarTreeParallelNotSafe.initialize_root_node">[docs]</a>    <span class="k">def</span> <span class="nf">initialize_root_node</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="c1"># The sequences are kept in reverse order from right to left starting from the last element;</span>
+        <span class="c1"># This is only happening for the AstarTreeParallelNotSafe version.</span>
+        <span class="c1"># In this way we don&#39;t need to look at the length vectors since some sequences will have differing lengths.</span>
+        <span class="c1"># In the memory safe way, we can keep the sequences right padded.  </span>
+        <span class="n">root</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">max_length</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">long</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">device</span><span class="p">)</span>
+        <span class="n">root</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span> <span class="o">=</span> <span class="mi">3</span>
+        <span class="k">return</span> <span class="n">root</span></div>
+
+<div class="viewcode-block" id="AstarTreeParallelNotSafe.clone_hiddens"><a class="viewcode-back" href="../../../desmiles.html#desmiles.decoding.astar.AstarTreeParallelNotSafe.clone_hiddens">[docs]</a>    <span class="k">def</span> <span class="nf">clone_hiddens</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="p">[(</span><span class="n">h</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">clone</span><span class="p">(),</span><span class="n">h</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">clone</span><span class="p">())</span> <span class="k">for</span> <span class="n">h</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">desmiles</span><span class="o">.</span><span class="n">hiddens</span><span class="p">]</span></div>
+
+    <span class="k">def</span> <span class="fm">__next__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="c1"># If no more room for expansion</span>
+        <span class="k">while</span> <span class="kc">True</span><span class="p">:</span>
+            <span class="c1"># In this version of Astar we don&#39;t keep expanding if we&#39;ve reached the max branches.</span>
+            <span class="c1"># This differs from the logic of the early astar algorithm used in the paper.</span>
+            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">num_branches</span> <span class="o">&gt;</span> <span class="bp">self</span><span class="o">.</span><span class="n">max_branches</span><span class="p">:</span>
+                <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">leaf_queue</span><span class="o">.</span><span class="n">qsize</span><span class="p">()</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">:</span>
+                    <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">return_leaf_node</span><span class="p">()</span>
+                <span class="k">else</span><span class="p">:</span>
+                    <span class="k">return</span> <span class="n">np</span><span class="o">.</span><span class="n">inf</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">last_leaf_node</span>
+            <span class="c1"># Return a leaf node if it has the best score</span>
+            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">leaf_queue</span><span class="o">.</span><span class="n">queue</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="mi">0</span><span class="p">]</span> <span class="o">&lt;</span> <span class="bp">self</span><span class="o">.</span><span class="n">non_leaf_queue</span><span class="o">.</span><span class="n">queue</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="mi">0</span><span class="p">]:</span>
+                <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">return_leaf_node</span><span class="p">()</span>
+            <span class="c1"># Otherwise, purge queue and branch</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">purge_queue</span><span class="p">()</span> <span class="c1"># purge non-leaf queue if necessary</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">branch_and_bound</span><span class="p">()</span>
+
+<div class="viewcode-block" id="AstarTreeParallelNotSafe.branch_and_bound"><a class="viewcode-back" href="../../../desmiles.html#desmiles.decoding.astar.AstarTreeParallelNotSafe.branch_and_bound">[docs]</a>    <span class="k">def</span> <span class="nf">branch_and_bound</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="c1"># get nodes to expand</span>
+        <span class="n">seqs</span><span class="p">,</span> <span class="n">scores</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">branch</span><span class="p">()</span>
+        <span class="c1">#seqs, scores = self.post_branch_callback(seqs, scores)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">bound</span><span class="p">(</span><span class="n">seqs</span><span class="p">,</span> <span class="n">scores</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">num_branches</span> <span class="o">+=</span> <span class="mi">1</span></div>
+
+
+<div class="viewcode-block" id="AstarTreeParallelNotSafe.branch"><a class="viewcode-back" href="../../../desmiles.html#desmiles.decoding.astar.AstarTreeParallelNotSafe.branch">[docs]</a>    <span class="k">def</span> <span class="nf">branch</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="c1"># Prepare for the branching operation</span>
+        <span class="c1"># This branch is more complex than the plain Astar because it handles hidden states.</span>
+        <span class="c1"># Collect the scores, seqs, hiddens, etc for up to num_expand nodes</span>
+        <span class="n">scores</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="n">seqs</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="n">hiddens</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="c1"># When you branch a node every child has its own hidden state branching from the same parent hidden state</span>
+        <span class="c1"># this index maps back to the hidden state of the parent.</span>
+        <span class="n">hidden_idxs</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="n">num_nodes</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">non_leaf_queue</span><span class="o">.</span><span class="n">qsize</span><span class="p">()</span>
+        <span class="c1"># This is a dictionary from the node tensor to a hidden state and a hidden_idx.</span>
+        <span class="n">node_to_hiddens</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">node_to_hiddens</span>
+        <span class="k">while</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">scores</span><span class="p">)</span> <span class="o">&lt;</span> <span class="nb">min</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">num_expand</span><span class="p">,</span> <span class="n">num_nodes</span><span class="p">)):</span>
+            <span class="n">score</span><span class="p">,</span> <span class="n">_</span><span class="p">,</span> <span class="n">seq</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">non_leaf_queue</span><span class="o">.</span><span class="n">get</span><span class="p">()</span>
+            <span class="n">scores</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">score</span><span class="p">)</span>
+            <span class="n">seqs</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">seq</span><span class="p">)</span>
+            <span class="n">hidden</span><span class="p">,</span> <span class="n">idx</span> <span class="o">=</span> <span class="n">node_to_hiddens</span><span class="p">[</span><span class="n">seq</span><span class="p">]</span>
+            <span class="n">hiddens</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">hidden</span><span class="p">)</span>
+            <span class="n">hidden_idxs</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">idx</span><span class="p">)</span>
+        <span class="n">scores</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">tensor</span><span class="p">(</span><span class="n">scores</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">device</span><span class="p">)</span>
+        <span class="n">seqs</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">stack</span><span class="p">(</span><span class="n">seqs</span><span class="p">)</span>
+        <span class="c1"># select all the parent hidden states</span>
+        <span class="n">hiddens</span> <span class="o">=</span> <span class="n">AstarTreeParallelNotSafe</span><span class="o">.</span><span class="n">select_all_hiddens</span><span class="p">(</span><span class="n">hiddens</span><span class="p">,</span> <span class="n">hidden_idxs</span><span class="p">)</span>
+        <span class="c1"># concatenate all the states so we can batch evaluate them.</span>
+        <span class="n">hiddens</span> <span class="o">=</span> <span class="n">AstarTreeParallelNotSafe</span><span class="o">.</span><span class="n">concat_hiddens</span><span class="p">(</span><span class="n">hiddens</span><span class="p">)</span>
+        <span class="c1"># set the hidden states</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">desmiles</span><span class="o">.</span><span class="n">hiddens</span> <span class="o">=</span> <span class="n">hiddens</span>
+        <span class="c1"># set the batch size (seqs legnth is same as length of hiddens[0][0]; first layer; cell state of hidden)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">desmiles</span><span class="o">.</span><span class="n">bs</span> <span class="o">=</span> <span class="n">seqs</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+        <span class="k">return</span> <span class="n">seqs</span><span class="p">,</span> <span class="n">scores</span></div>
+
+<div class="viewcode-block" id="AstarTreeParallelNotSafe.bound"><a class="viewcode-back" href="../../../desmiles.html#desmiles.decoding.astar.AstarTreeParallelNotSafe.bound">[docs]</a>    <span class="k">def</span> <span class="nf">bound</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">seqs</span><span class="p">,</span> <span class="n">scores</span><span class="p">):</span>
+        <span class="k">with</span> <span class="n">torch</span><span class="o">.</span><span class="n">no_grad</span><span class="p">():</span>
+            <span class="c1"># hidden states are ready, so this only passes the last elements to the desmiles model</span>
+            <span class="n">log_probs</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_log_probabilities</span><span class="p">(</span><span class="n">seqs</span><span class="p">[:,</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">unsqueeze</span><span class="p">(</span><span class="mi">0</span><span class="p">))</span>
+            <span class="c1"># Get an index for what parent that child was from.</span>
+            <span class="c1"># Important for getting the hidden states back.</span>
+            <span class="n">seq_idx</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_seq_idx</span><span class="p">(</span><span class="n">log_probs</span><span class="p">)</span>
+            <span class="c1"># Make the sequences and the scores of the children</span>
+            <span class="n">seqs</span><span class="p">,</span> <span class="n">scores</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_children</span><span class="p">(</span><span class="n">seqs</span><span class="p">,</span> <span class="n">log_probs</span><span class="p">,</span> <span class="n">scores</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">add_children_to_queue</span><span class="p">(</span><span class="n">seqs</span><span class="p">,</span> <span class="n">scores</span><span class="p">,</span> <span class="n">seq_idx</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="AstarTreeParallelNotSafe.get_log_probabilities"><a class="viewcode-back" href="../../../desmiles.html#desmiles.decoding.astar.AstarTreeParallelNotSafe.get_log_probabilities">[docs]</a>    <span class="k">def</span> <span class="nf">get_log_probabilities</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">seqs</span><span class="p">):</span>
+        <span class="n">logits</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">desmiles</span><span class="p">(</span><span class="n">seqs</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">F</span><span class="o">.</span><span class="n">log_softmax</span><span class="p">(</span><span class="n">logits</span><span class="p">[:,</span><span class="o">-</span><span class="mi">1</span><span class="p">],</span> <span class="n">dim</span><span class="o">=-</span><span class="mi">1</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="AstarTreeParallelNotSafe.add_children_to_queue"><a class="viewcode-back" href="../../../desmiles.html#desmiles.decoding.astar.AstarTreeParallelNotSafe.add_children_to_queue">[docs]</a>    <span class="k">def</span> <span class="nf">add_children_to_queue</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">seqs</span><span class="p">,</span> <span class="n">scores</span><span class="p">,</span> <span class="n">seq_idxs</span><span class="p">):</span>
+        <span class="n">node_to_hiddens</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">node_to_hiddens</span>
+        <span class="n">hiddens</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">clone_hiddens</span><span class="p">()</span>
+        <span class="n">sort_idx</span> <span class="o">=</span> <span class="n">AstarTreeParallelNotSafe</span><span class="o">.</span><span class="n">sort_scores</span><span class="p">(</span><span class="n">scores</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">max_branches</span><span class="p">)</span>
+        <span class="n">scores</span> <span class="o">=</span> <span class="n">scores</span><span class="p">[</span><span class="n">sort_idx</span><span class="p">]</span>
+        <span class="n">seqs</span> <span class="o">=</span> <span class="n">seqs</span><span class="p">[</span><span class="n">sort_idx</span><span class="p">]</span>
+        <span class="n">seq_idxs</span> <span class="o">=</span> <span class="n">seq_idxs</span><span class="p">[</span><span class="n">sort_idx</span><span class="p">]</span>
+        <span class="n">is_leaf_node</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">are_children_leaf_nodes</span><span class="p">(</span><span class="n">seqs</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="p">(</span><span class="n">score</span><span class="p">,</span> <span class="n">child</span><span class="p">,</span> <span class="n">seq_idx</span><span class="p">)</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="nb">zip</span><span class="p">(</span><span class="n">scores</span><span class="p">[</span><span class="n">is_leaf_node</span><span class="p">]</span><span class="o">.</span><span class="n">tolist</span><span class="p">(),</span> <span class="n">seqs</span><span class="p">[</span><span class="n">is_leaf_node</span><span class="p">],</span> <span class="n">seq_idxs</span><span class="p">[</span><span class="n">is_leaf_node</span><span class="p">]</span><span class="o">.</span><span class="n">tolist</span><span class="p">())):</span>
+            <span class="n">node_to_hiddens</span><span class="p">[</span><span class="n">child</span><span class="p">]</span> <span class="o">=</span> <span class="p">(</span><span class="n">hiddens</span><span class="p">,</span> <span class="n">seq_idx</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">leaf_queue</span><span class="o">.</span><span class="n">put</span><span class="p">((</span><span class="n">score</span><span class="p">,</span> <span class="nb">next</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">unique_identifier</span><span class="p">),</span> <span class="n">child</span><span class="p">))</span>
+        <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="p">(</span><span class="n">score</span><span class="p">,</span> <span class="n">child</span><span class="p">,</span> <span class="n">seq_idx</span><span class="p">)</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="nb">zip</span><span class="p">(</span><span class="n">scores</span><span class="p">[</span><span class="o">~</span><span class="n">is_leaf_node</span><span class="p">]</span><span class="o">.</span><span class="n">tolist</span><span class="p">(),</span> <span class="n">seqs</span><span class="p">[</span><span class="o">~</span><span class="n">is_leaf_node</span><span class="p">],</span> <span class="n">seq_idxs</span><span class="p">[</span><span class="o">~</span><span class="n">is_leaf_node</span><span class="p">]</span><span class="o">.</span><span class="n">tolist</span><span class="p">())):</span>
+            <span class="n">node_to_hiddens</span><span class="p">[</span><span class="n">child</span><span class="p">]</span> <span class="o">=</span> <span class="p">(</span><span class="n">hiddens</span><span class="p">,</span> <span class="n">seq_idx</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">non_leaf_queue</span><span class="o">.</span><span class="n">put</span><span class="p">((</span><span class="n">score</span><span class="p">,</span> <span class="nb">next</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">unique_identifier</span><span class="p">),</span> <span class="n">child</span><span class="p">))</span></div>
+
+<div class="viewcode-block" id="AstarTreeParallelNotSafe.sort_scores"><a class="viewcode-back" href="../../../desmiles.html#desmiles.decoding.astar.AstarTreeParallelNotSafe.sort_scores">[docs]</a>    <span class="nd">@staticmethod</span>
+    <span class="k">def</span> <span class="nf">sort_scores</span><span class="p">(</span><span class="n">scores</span><span class="p">,</span> <span class="n">max_branches</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">torch</span><span class="o">.</span><span class="n">sort</span><span class="p">(</span><span class="n">scores</span><span class="p">)[</span><span class="mi">1</span><span class="p">][:</span><span class="n">max_branches</span><span class="p">]</span></div>
+
+
+<div class="viewcode-block" id="AstarTreeParallelNotSafe.get_children"><a class="viewcode-back" href="../../../desmiles.html#desmiles.decoding.astar.AstarTreeParallelNotSafe.get_children">[docs]</a>    <span class="k">def</span> <span class="nf">get_children</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">seqs</span><span class="p">,</span> <span class="n">log_probs</span><span class="p">,</span> <span class="n">parent_nlps</span><span class="p">):</span>
+        <span class="n">children</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="n">log_probs</span><span class="o">.</span><span class="n">size</span><span class="p">(</span><span class="mi">1</span><span class="p">),</span> <span class="n">device</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">device</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">long</span><span class="p">)[</span><span class="kc">None</span><span class="p">,:]</span><span class="o">.</span><span class="n">expand</span><span class="p">(</span><span class="n">seqs</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="n">log_probs</span><span class="o">.</span><span class="n">size</span><span class="p">(</span><span class="mi">1</span><span class="p">))[:,:,</span><span class="kc">None</span><span class="p">]</span>
+        <span class="n">children</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">cat</span><span class="p">([</span><span class="n">seqs</span><span class="p">[:,</span><span class="kc">None</span><span class="p">,:]</span><span class="o">.</span><span class="n">expand</span><span class="p">(</span><span class="n">seqs</span><span class="o">.</span><span class="n">size</span><span class="p">(</span><span class="mi">0</span><span class="p">),</span> <span class="n">log_probs</span><span class="o">.</span><span class="n">size</span><span class="p">(</span><span class="mi">1</span><span class="p">),</span> <span class="n">seqs</span><span class="o">.</span><span class="n">size</span><span class="p">(</span><span class="mi">1</span><span class="p">)),</span> <span class="n">children</span><span class="p">],</span><span class="n">dim</span><span class="o">=</span><span class="mi">2</span><span class="p">)</span>
+        <span class="n">children</span> <span class="o">=</span> <span class="n">children</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">,</span> <span class="n">children</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">])[:,</span><span class="mi">1</span><span class="p">:]</span>
+        <span class="n">scores</span> <span class="o">=</span> <span class="p">(</span><span class="n">parent_nlps</span><span class="p">[:,</span><span class="kc">None</span><span class="p">]</span> <span class="o">-</span> <span class="n">log_probs</span><span class="p">)</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">children</span><span class="p">,</span> <span class="n">scores</span></div>
+
+<div class="viewcode-block" id="AstarTreeParallelNotSafe.are_children_leaf_nodes"><a class="viewcode-back" href="../../../desmiles.html#desmiles.decoding.astar.AstarTreeParallelNotSafe.are_children_leaf_nodes">[docs]</a>    <span class="k">def</span> <span class="nf">are_children_leaf_nodes</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">children</span><span class="p">):</span>
+        <span class="n">lengths</span> <span class="o">=</span> <span class="p">(</span><span class="n">children</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">)</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">dim</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span> <span class="o">-</span> <span class="mi">1</span>
+        <span class="n">last_chars</span> <span class="o">=</span> <span class="n">children</span><span class="p">[:,</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span>
+        <span class="n">last_char_is_stop</span> <span class="o">=</span> <span class="p">(</span><span class="n">last_chars</span> <span class="o">==</span> <span class="mi">1</span><span class="p">)</span> <span class="o">|</span> <span class="p">(</span><span class="n">last_chars</span> <span class="o">==</span> <span class="mi">2</span><span class="p">)</span>
+        <span class="n">is_leaf_node</span> <span class="o">=</span> <span class="p">(((</span><span class="n">lengths</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mi">3</span><span class="p">)</span> <span class="o">&amp;</span> <span class="n">last_char_is_stop</span><span class="p">)</span> <span class="o">|</span> <span class="p">((</span><span class="n">lengths</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span> <span class="o">==</span> <span class="mi">30</span><span class="p">)</span> <span class="o">|</span> <span class="p">(</span><span class="n">last_chars</span> <span class="o">==</span> <span class="mi">0</span><span class="p">)</span> 
+        <span class="k">return</span> <span class="n">is_leaf_node</span></div>
+
+<div class="viewcode-block" id="AstarTreeParallelNotSafe.select_all_hiddens"><a class="viewcode-back" href="../../../desmiles.html#desmiles.decoding.astar.AstarTreeParallelNotSafe.select_all_hiddens">[docs]</a>    <span class="nd">@staticmethod</span>
+    <span class="k">def</span> <span class="nf">select_all_hiddens</span><span class="p">(</span><span class="n">hiddens</span><span class="p">,</span> <span class="n">idxs</span><span class="p">):</span>
+        <span class="k">return</span> <span class="p">[</span><span class="n">AstarTreeParallelNotSafe</span><span class="o">.</span><span class="n">select_hiddens</span><span class="p">(</span><span class="n">hidden</span><span class="p">,</span> <span class="n">idx</span><span class="p">)</span> <span class="k">for</span> <span class="n">hidden</span><span class="p">,</span> <span class="n">idx</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">hiddens</span><span class="p">,</span> <span class="n">idxs</span><span class="p">)]</span></div>
+
+<div class="viewcode-block" id="AstarTreeParallelNotSafe.select_hiddens"><a class="viewcode-back" href="../../../desmiles.html#desmiles.decoding.astar.AstarTreeParallelNotSafe.select_hiddens">[docs]</a>    <span class="nd">@staticmethod</span>
+    <span class="k">def</span> <span class="nf">select_hiddens</span><span class="p">(</span><span class="n">hiddens</span><span class="p">,</span> <span class="n">idx</span><span class="p">,</span> <span class="n">move_to_device</span><span class="o">=</span><span class="kc">False</span><span class="p">):</span>
+        <span class="k">return</span> <span class="p">[(</span><span class="n">h</span><span class="p">[</span><span class="mi">0</span><span class="p">][:,</span><span class="n">idx</span><span class="p">:</span><span class="n">idx</span><span class="o">+</span><span class="mi">1</span><span class="p">,:],</span><span class="n">h</span><span class="p">[</span><span class="mi">1</span><span class="p">][:,</span><span class="n">idx</span><span class="p">:</span><span class="n">idx</span><span class="o">+</span><span class="mi">1</span><span class="p">,:])</span> <span class="k">for</span> <span class="n">h</span> <span class="ow">in</span> <span class="n">hiddens</span><span class="p">]</span></div>
+
+<div class="viewcode-block" id="AstarTreeParallelNotSafe.get_seq_idx"><a class="viewcode-back" href="../../../desmiles.html#desmiles.decoding.astar.AstarTreeParallelNotSafe.get_seq_idx">[docs]</a>    <span class="k">def</span> <span class="nf">get_seq_idx</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">log_probs</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">torch</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="n">log_probs</span><span class="o">.</span><span class="n">size</span><span class="p">(</span><span class="mi">0</span><span class="p">),</span> <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">long</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">device</span><span class="p">)</span><span class="o">.</span><span class="n">unsqueeze</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span><span class="o">.</span><span class="n">expand</span><span class="p">(</span><span class="n">log_probs</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="n">log_probs</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">1</span><span class="p">])</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="AstarTreeParallelNotSafe.concat_hiddens"><a class="viewcode-back" href="../../../desmiles.html#desmiles.decoding.astar.AstarTreeParallelNotSafe.concat_hiddens">[docs]</a>    <span class="nd">@staticmethod</span>
+    <span class="k">def</span> <span class="nf">concat_hiddens</span><span class="p">(</span><span class="n">hiddens</span><span class="p">):</span>
+        <span class="n">layers</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="k">for</span> <span class="n">layer</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">hiddens</span><span class="p">[</span><span class="mi">0</span><span class="p">])):</span>
+            <span class="n">hidden_states</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">cat</span><span class="p">([</span><span class="n">h</span><span class="p">[</span><span class="n">layer</span><span class="p">][</span><span class="mi">0</span><span class="p">]</span> <span class="k">for</span> <span class="n">h</span> <span class="ow">in</span> <span class="n">hiddens</span><span class="p">],</span> <span class="n">dim</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+            <span class="n">cell_states</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">cat</span><span class="p">([</span><span class="n">h</span><span class="p">[</span><span class="n">layer</span><span class="p">][</span><span class="mi">1</span><span class="p">]</span> <span class="k">for</span> <span class="n">h</span> <span class="ow">in</span> <span class="n">hiddens</span><span class="p">],</span> <span class="n">dim</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+            <span class="n">layers</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="n">hidden_states</span><span class="p">,</span> <span class="n">cell_states</span><span class="p">))</span>
+        <span class="k">return</span> <span class="n">layers</span></div>
+
+<div class="viewcode-block" id="AstarTreeParallelNotSafe.purge_queue"><a class="viewcode-back" href="../../../desmiles.html#desmiles.decoding.astar.AstarTreeParallelNotSafe.purge_queue">[docs]</a>    <span class="k">def</span> <span class="nf">purge_queue</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">downto</span><span class="o">=</span><span class="mi">10000</span><span class="p">,</span> <span class="n">maxsize</span><span class="o">=</span><span class="mi">1000000</span><span class="p">):</span> 
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">non_leaf_queue</span><span class="o">.</span><span class="n">qsize</span><span class="p">()</span> <span class="o">&gt;</span> <span class="n">maxsize</span><span class="p">:</span>
+            <span class="n">q2</span> <span class="o">=</span> <span class="n">queue</span><span class="o">.</span><span class="n">PriorityQueue</span><span class="p">()</span>
+            <span class="c1">## Get top elements into new queue</span>
+            <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">downto</span><span class="p">):</span>
+                <span class="n">q2</span><span class="o">.</span><span class="n">put</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">non_leaf_queue</span><span class="o">.</span><span class="n">get</span><span class="p">())</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">non_leaf_queue</span> <span class="o">=</span> <span class="n">q2</span></div>
+
+<div class="viewcode-block" id="AstarTreeParallelNotSafe.return_leaf_node"><a class="viewcode-back" href="../../../desmiles.html#desmiles.decoding.astar.AstarTreeParallelNotSafe.return_leaf_node">[docs]</a>    <span class="k">def</span> <span class="nf">return_leaf_node</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="n">score</span><span class="p">,</span> <span class="n">_</span><span class="p">,</span> <span class="n">seq</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">leaf_queue</span><span class="o">.</span><span class="n">get</span><span class="p">()</span>  <span class="c1"># pop the top, decode and yield.</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">last_leaf_node</span> <span class="o">=</span> <span class="n">seq</span>
+        <span class="k">return</span> <span class="n">score</span><span class="p">,</span> <span class="n">seq</span></div></div>
+
+<div class="viewcode-block" id="left_pad_to_right_pad"><a class="viewcode-back" href="../../../desmiles.html#desmiles.decoding.astar.left_pad_to_right_pad">[docs]</a><span class="k">def</span> <span class="nf">left_pad_to_right_pad</span><span class="p">(</span><span class="n">seqs</span><span class="p">):</span>
+    <span class="n">lengths</span> <span class="o">=</span> <span class="p">(</span><span class="n">seqs</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">)</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">dim</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+    <span class="n">ns</span><span class="p">,</span> <span class="n">sl</span> <span class="o">=</span> <span class="n">seqs</span><span class="o">.</span><span class="n">shape</span>
+    <span class="n">new_seqs</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">zeros_like</span><span class="p">(</span><span class="n">seqs</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">i</span><span class="p">,(</span><span class="n">s</span><span class="p">,</span><span class="n">l</span><span class="p">)</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="nb">zip</span><span class="p">(</span><span class="n">seqs</span><span class="p">,</span> <span class="n">lengths</span><span class="p">)):</span>
+        <span class="n">new_seqs</span><span class="p">[</span><span class="n">i</span><span class="p">,:</span><span class="n">l</span><span class="p">]</span> <span class="o">=</span> <span class="n">s</span><span class="p">[</span><span class="n">s</span><span class="o">&gt;</span><span class="mi">0</span><span class="p">]</span>
+    <span class="k">return</span> <span class="n">new_seqs</span></div>
+
+<div class="viewcode-block" id="AstarTreeParallelHybrid"><a class="viewcode-back" href="../../../desmiles.html#desmiles.decoding.astar.AstarTreeParallelHybrid">[docs]</a><span class="k">class</span> <span class="nc">AstarTreeParallelHybrid</span><span class="p">(</span><span class="n">AstarTreeParallelNotSafe</span><span class="p">):</span>
+<div class="viewcode-block" id="AstarTreeParallelHybrid.make_queue_with_right_padding"><a class="viewcode-back" href="../../../desmiles.html#desmiles.decoding.astar.AstarTreeParallelHybrid.make_queue_with_right_padding">[docs]</a>    <span class="nd">@staticmethod</span>
+    <span class="k">def</span> <span class="nf">make_queue_with_right_padding</span><span class="p">(</span><span class="n">queue</span><span class="p">):</span>
+        <span class="n">scores</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="n">ids</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="n">tensors</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="k">for</span> <span class="n">score</span><span class="p">,</span> <span class="n">i</span><span class="p">,</span> <span class="n">t</span> <span class="ow">in</span> <span class="n">queue</span><span class="o">.</span><span class="n">queue</span><span class="p">:</span>
+            <span class="n">scores</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">score</span><span class="p">)</span>
+            <span class="n">ids</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">i</span><span class="p">)</span>
+            <span class="n">tensors</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">t</span><span class="p">)</span>
+        <span class="n">tensors</span> <span class="o">=</span> <span class="n">left_pad_to_right_pad</span><span class="p">(</span><span class="n">torch</span><span class="o">.</span><span class="n">stack</span><span class="p">(</span><span class="n">tensors</span><span class="p">))</span>
+        <span class="n">new_queue</span> <span class="o">=</span> <span class="p">[(</span><span class="n">s</span><span class="p">,</span><span class="n">i</span><span class="p">,</span><span class="n">t</span><span class="p">)</span> <span class="k">for</span> <span class="n">s</span><span class="p">,</span><span class="n">i</span><span class="p">,</span><span class="n">t</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">scores</span><span class="p">,</span> <span class="n">ids</span><span class="p">,</span> <span class="n">tensors</span><span class="p">)]</span>
+        <span class="n">queue</span><span class="o">.</span><span class="n">queue</span> <span class="o">=</span> <span class="n">new_queue</span>
+        <span class="k">return</span> <span class="n">queue</span></div>
+
+    <span class="k">def</span> <span class="fm">__next__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="n">safe_branch_thresh</span> <span class="o">=</span> <span class="mi">500</span>
+        <span class="c1"># If no more room for expansion</span>
+        <span class="k">while</span> <span class="kc">True</span><span class="p">:</span>
+            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">num_branches</span> <span class="o">==</span> <span class="n">safe_branch_thresh</span><span class="p">:</span>
+                <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Switching to memory safe queue!&quot;</span><span class="p">)</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">purge_queue</span><span class="p">(</span><span class="n">maxsize</span><span class="o">=</span><span class="mi">10000</span><span class="p">)</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">non_leaf_queue</span> <span class="o">=</span> <span class="n">AstarTreeParallelHybrid</span><span class="o">.</span><span class="n">make_queue_with_right_padding</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">non_leaf_queue</span><span class="p">)</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">leaf_queue</span> <span class="o">=</span> <span class="n">AstarTreeParallelHybrid</span><span class="o">.</span><span class="n">make_queue_with_right_padding</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">leaf_queue</span><span class="p">)</span>
+
+                <span class="bp">self</span><span class="o">.</span><span class="n">safe_astar</span> <span class="o">=</span> <span class="n">AstarTreeParallel</span><span class="o">.</span><span class="n">create_from_astar_tree</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">safe_astar</span><span class="o">.</span><span class="n">num_expand</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">num_expand</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">safe_astar</span><span class="o">.</span><span class="n">desmiles</span><span class="o">.</span><span class="n">embed_fingerprints</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">fp</span><span class="p">)</span> <span class="c1"># initialize rnn_desmiles by embedding the fingerprint</span>
+                <span class="k">del</span> <span class="bp">self</span><span class="o">.</span><span class="n">node_to_hiddens</span>
+                <span class="n">torch</span><span class="o">.</span><span class="n">cuda</span><span class="o">.</span><span class="n">empty_cache</span><span class="p">()</span>
+            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">num_branches</span> <span class="o">&lt;</span> <span class="n">safe_branch_thresh</span><span class="p">:</span>
+                <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">num_branches</span> <span class="o">&gt;</span> <span class="bp">self</span><span class="o">.</span><span class="n">max_branches</span><span class="p">:</span>
+                    <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">leaf_queue</span><span class="o">.</span><span class="n">qsize</span><span class="p">()</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">:</span>
+                        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">return_leaf_node</span><span class="p">()</span>
+                    <span class="k">else</span><span class="p">:</span>
+                        <span class="k">return</span> <span class="n">np</span><span class="o">.</span><span class="n">inf</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">last_leaf_node</span>
+                <span class="c1"># Return a leaf node if it has the best score</span>
+                <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">leaf_queue</span><span class="o">.</span><span class="n">queue</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="mi">0</span><span class="p">]</span> <span class="o">&lt;</span> <span class="bp">self</span><span class="o">.</span><span class="n">non_leaf_queue</span><span class="o">.</span><span class="n">queue</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="mi">0</span><span class="p">]:</span>
+                    <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">return_leaf_node</span><span class="p">()</span>
+                <span class="c1"># Otherwise, purge queue and branch</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">purge_queue</span><span class="p">()</span> <span class="c1"># purge non-leaf queue if necessary</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">branch_and_bound</span><span class="p">()</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">num_branches</span> <span class="o">+=</span> <span class="mi">1</span>
+                <span class="k">return</span> <span class="nb">next</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">safe_astar</span><span class="p">)</span></div>
+
+<span class="c1">########################</span>
+<span class="c1">### OLD ASTAR CODE</span>
+<span class="c1">########################</span>
+
+<div class="viewcode-block" id="get_astar_tree"><a class="viewcode-back" href="../../../desmiles.html#desmiles.decoding.astar.get_astar_tree">[docs]</a><span class="k">def</span> <span class="nf">get_astar_tree</span><span class="p">(</span><span class="n">fp</span><span class="p">,</span> <span class="n">model</span><span class="p">,</span> <span class="n">decoder</span><span class="p">,</span> <span class="n">isLeafNode</span><span class="p">,</span> <span class="n">max_length</span><span class="o">=</span><span class="mi">30</span><span class="p">,</span> <span class="n">max_branches</span><span class="o">=</span><span class="mi">5000</span><span class="p">):</span>
+    <span class="k">assert</span> <span class="nb">type</span><span class="p">(</span><span class="n">fp</span><span class="p">)</span> <span class="ow">is</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span>
+    <span class="c1">#import pdb; pdb.set_trace()</span>
+    <span class="n">partial_mol_queue</span> <span class="o">=</span> <span class="n">queue</span><span class="o">.</span><span class="n">PriorityQueue</span><span class="p">()</span>
+    <span class="c1"># Initialize string with (3)</span>
+    <span class="n">current_string</span> <span class="o">=</span> <span class="p">[</span><span class="mi">3</span><span class="p">]</span>
+    <span class="n">partial_mol_queue</span><span class="o">.</span><span class="n">put</span><span class="p">((</span><span class="mi">0</span><span class="p">,</span> <span class="nb">tuple</span><span class="p">(</span><span class="n">current_string</span><span class="p">)))</span>
+    <span class="c1"># Add and initialize a Complete molecule queue</span>
+    <span class="n">mol_queue</span> <span class="o">=</span> <span class="n">queue</span><span class="o">.</span><span class="n">PriorityQueue</span><span class="p">()</span>
+    <span class="n">mol_queue</span><span class="o">.</span><span class="n">put</span><span class="p">((</span><span class="n">np</span><span class="o">.</span><span class="n">inf</span><span class="p">,</span> <span class="nb">tuple</span><span class="p">(</span><span class="n">current_string</span><span class="p">)))</span>
+    <span class="n">num_branches</span> <span class="o">=</span> <span class="mi">1</span>
+    <span class="n">last_smiles_string</span> <span class="o">=</span> <span class="s1">&#39;&#39;</span>
+    <span class="n">last_smiles_vector</span> <span class="o">=</span> <span class="kc">None</span>
+    <span class="n">device</span> <span class="o">=</span> <span class="s2">&quot;cuda&quot;</span> <span class="k">if</span> <span class="n">torch</span><span class="o">.</span><span class="n">cuda</span><span class="o">.</span><span class="n">is_available</span><span class="p">()</span> <span class="k">else</span> <span class="s2">&quot;cpu&quot;</span>
+    <span class="k">while</span> <span class="kc">True</span><span class="p">:</span>
+        <span class="k">if</span> <span class="n">num_branches</span> <span class="o">&gt;</span> <span class="n">max_branches</span><span class="p">:</span>  <span class="c1"># no more room for expansion</span>
+            <span class="k">if</span> <span class="n">mol_queue</span><span class="o">.</span><span class="n">qsize</span><span class="p">()</span> <span class="o">&gt;</span> <span class="mi">4</span><span class="p">:</span>  <span class="c1"># if we have enough addional molecules (which we should have)</span>
+                <span class="n">score</span><span class="p">,</span> <span class="n">smiles_tup</span> <span class="o">=</span> <span class="n">mol_queue</span><span class="o">.</span><span class="n">get</span><span class="p">()</span>  <span class="c1"># pop the top, decode and yield.</span>
+                <span class="n">smiles_string</span> <span class="o">=</span> <span class="n">decoder</span><span class="p">(</span><span class="nb">list</span><span class="p">(</span><span class="n">smiles_tup</span><span class="p">))</span>
+                <span class="n">last_smiles_string</span> <span class="o">=</span> <span class="n">smiles_string</span>
+                <span class="n">last_smiles_vector</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">smiles_tup</span><span class="p">)</span>
+                <span class="k">yield</span> <span class="n">score</span><span class="p">,</span> <span class="n">smiles_string</span><span class="p">,</span> <span class="n">last_smiles_vector</span><span class="p">,</span> <span class="n">num_branches</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="k">yield</span> <span class="n">np</span><span class="o">.</span><span class="n">inf</span><span class="p">,</span> <span class="n">last_smiles_string</span><span class="p">,</span> <span class="n">last_smiles_vector</span><span class="p">,</span> <span class="n">num_branches</span>
+        <span class="n">partial_mol_queue</span> <span class="o">=</span> <span class="n">purgedQueue</span><span class="p">(</span><span class="n">partial_mol_queue</span><span class="p">)</span>
+        <span class="c1"># grab the queue with the higher priority</span>
+        <span class="n">que_to_pop</span> <span class="o">=</span> <span class="n">partial_mol_queue</span> <span class="k">if</span> <span class="n">partial_mol_queue</span><span class="o">.</span><span class="n">queue</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="mi">0</span><span class="p">]</span> <span class="o">&lt;</span> <span class="n">mol_queue</span><span class="o">.</span><span class="n">queue</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="mi">0</span><span class="p">]</span> <span class="k">else</span> <span class="n">mol_queue</span>
+        <span class="n">score</span><span class="p">,</span> <span class="n">smiles_tup</span> <span class="o">=</span> <span class="n">que_to_pop</span><span class="o">.</span><span class="n">get</span><span class="p">()</span>
+        <span class="k">if</span> <span class="n">isLeafNode</span><span class="p">(</span><span class="n">smiles_tup</span><span class="p">):</span>
+            <span class="n">smiles_string</span> <span class="o">=</span> <span class="n">decoder</span><span class="p">(</span><span class="nb">list</span><span class="p">(</span><span class="n">smiles_tup</span><span class="p">))</span>
+            <span class="n">last_smiles_string</span> <span class="o">=</span> <span class="n">smiles_string</span>
+            <span class="n">last_smiles_vector</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">smiles_tup</span><span class="p">)</span>
+            <span class="k">yield</span> <span class="n">score</span><span class="p">,</span> <span class="n">smiles_string</span><span class="p">,</span> <span class="n">last_smiles_vector</span><span class="p">,</span> <span class="n">num_branches</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">num_branches</span> <span class="o">+=</span> <span class="mi">1</span>
+            <span class="n">children</span> <span class="o">=</span> <span class="n">getChildren</span><span class="p">(</span><span class="n">fp</span><span class="p">,</span> <span class="nb">list</span><span class="p">(</span><span class="n">smiles_tup</span><span class="p">),</span> <span class="n">model</span><span class="p">,</span> <span class="n">score</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="n">device</span><span class="p">)</span>
+            <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="p">(</span><span class="n">score</span><span class="p">,</span> <span class="n">child</span><span class="p">)</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">children</span><span class="p">):</span>
+                <span class="k">if</span> <span class="p">(</span><span class="n">i</span><span class="o">==</span><span class="mi">1</span><span class="p">)</span> <span class="ow">or</span> <span class="p">(</span><span class="n">i</span><span class="o">==</span><span class="mi">2</span><span class="p">):</span>
+                    <span class="c1"># change if (len(child) &lt; 3) or (child[0] == child[-1]):</span>
+                    <span class="k">if</span> <span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">child</span><span class="p">)</span> <span class="o">&lt;</span> <span class="mi">4</span><span class="p">)</span> <span class="ow">or</span> <span class="p">(</span><span class="n">child</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="o">==</span> <span class="n">child</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]):</span>
+                        <span class="n">partial_mol_queue</span><span class="o">.</span><span class="n">put</span><span class="p">((</span><span class="n">score</span><span class="p">,</span> <span class="nb">tuple</span><span class="p">(</span><span class="n">child</span><span class="p">)))</span>
+                        <span class="k">continue</span>
+                    <span class="n">mol_queue</span><span class="o">.</span><span class="n">put</span><span class="p">((</span><span class="n">score</span><span class="p">,</span> <span class="nb">tuple</span><span class="p">(</span><span class="n">child</span><span class="p">)))</span>  <span class="c1"># the begin and end subSMILES</span>
+                <span class="k">else</span><span class="p">:</span>
+                    <span class="n">partial_mol_queue</span><span class="o">.</span><span class="n">put</span><span class="p">((</span><span class="n">score</span><span class="p">,</span> <span class="nb">tuple</span><span class="p">(</span><span class="n">child</span><span class="p">)))</span></div>
+
+
+<div class="viewcode-block" id="getChildren"><a class="viewcode-back" href="../../../desmiles.html#desmiles.decoding.astar.getChildren">[docs]</a><span class="k">def</span> <span class="nf">getChildren</span><span class="p">(</span><span class="n">fp</span><span class="p">,</span> <span class="n">smiles_list</span><span class="p">,</span> <span class="n">model</span><span class="p">,</span> <span class="n">parent_score</span><span class="p">,</span> <span class="n">max_length</span><span class="o">=</span><span class="mi">30</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="s2">&quot;cpu&quot;</span><span class="p">):</span>
+    <span class="kn">import</span> <span class="nn">torch.nn.functional</span> <span class="k">as</span> <span class="nn">F</span>
+    <span class="n">lengths</span> <span class="o">=</span> <span class="p">[</span><span class="nb">len</span><span class="p">(</span><span class="n">smiles_list</span><span class="p">)]</span>
+    <span class="n">inp_smiles</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros</span><span class="p">((</span><span class="n">max_length</span><span class="p">,</span> <span class="mi">1</span><span class="p">),</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">int32</span><span class="p">)</span>
+    <span class="n">inp_smiles</span><span class="p">[:</span><span class="nb">len</span><span class="p">(</span><span class="n">smiles_list</span><span class="p">),</span> <span class="mi">0</span><span class="p">]</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">smiles_list</span><span class="p">)</span>
+    <span class="n">fp</span> <span class="o">=</span> <span class="n">fp</span><span class="p">[</span><span class="kc">None</span><span class="p">]</span>
+    <span class="k">with</span> <span class="n">torch</span><span class="o">.</span><span class="n">no_grad</span><span class="p">():</span>
+        <span class="n">energies</span><span class="p">,</span> <span class="n">_</span><span class="p">,</span> <span class="n">_</span> <span class="o">=</span> <span class="n">model</span><span class="p">(</span><span class="n">torch</span><span class="o">.</span><span class="n">tensor</span><span class="p">(</span><span class="n">inp_smiles</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">long</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="n">device</span><span class="p">),</span> <span class="n">fp</span><span class="p">,</span> <span class="n">torch</span><span class="o">.</span><span class="n">tensor</span><span class="p">(</span><span class="n">lengths</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">long</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="n">device</span><span class="p">))</span>
+        <span class="n">log_probs</span> <span class="o">=</span> <span class="n">F</span><span class="o">.</span><span class="n">log_softmax</span><span class="p">(</span><span class="n">energies</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">],</span><span class="n">dim</span><span class="o">=-</span><span class="mi">1</span><span class="p">)</span><span class="o">.</span><span class="n">data</span>
+    <span class="n">children</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">log_prob</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">log_probs</span><span class="p">):</span>
+        <span class="n">child</span> <span class="o">=</span> <span class="n">smiles_list</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+        <span class="n">child</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">i</span><span class="p">)</span>
+        <span class="n">children</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="n">parent_score</span> <span class="o">-</span> <span class="n">log_prob</span><span class="p">,</span> <span class="n">child</span><span class="p">))</span>
+    <span class="k">return</span> <span class="n">children</span></div>
+
+
+<div class="viewcode-block" id="purgedQueue"><a class="viewcode-back" href="../../../desmiles.html#desmiles.decoding.astar.purgedQueue">[docs]</a><span class="k">def</span> <span class="nf">purgedQueue</span><span class="p">(</span><span class="n">q</span><span class="p">,</span> <span class="n">downto</span><span class="o">=</span><span class="mi">10000</span><span class="p">,</span> <span class="n">maxsize</span><span class="o">=</span><span class="mi">1000000</span><span class="p">):</span>  <span class="c1">## will need to update to also keep mol_queue mols.</span>
+    <span class="k">if</span> <span class="n">q</span><span class="o">.</span><span class="n">qsize</span><span class="p">()</span> <span class="o">&gt;</span> <span class="n">maxsize</span><span class="p">:</span>
+        <span class="n">q2</span> <span class="o">=</span> <span class="n">queue</span><span class="o">.</span><span class="n">PriorityQueue</span><span class="p">()</span>
+        <span class="c1">## Get top elements into new queue</span>
+        <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">downto</span><span class="p">):</span>
+            <span class="n">q2</span><span class="o">.</span><span class="n">put</span><span class="p">(</span><span class="n">q</span><span class="o">.</span><span class="n">get</span><span class="p">())</span>
+        <span class="k">return</span> <span class="n">q2</span>
+    <span class="k">return</span> <span class="n">q</span></div>
+</pre></div>
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2018, 2019, 2020, D. E. Shaw Research.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>
