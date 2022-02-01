@@ -9,7 +9,7 @@ The corresponding dataset can be found on our [web site](https://www.deshawresea
 
 To train your own data you'll need a GPU compatible with CUDA 10.1.  You can run without a GPU using our pre-trained data set, but performance will be lower than with a GPU.
 
-Additionally, you'll need a compatible cuDNN and
+You will need a compatible cuDNN and
 
 ```
 python >=3.7, <=3.9
@@ -19,8 +19,24 @@ scipy
 numpy
 rdkit
 ```
+The tests require `pytest` and `hypothesis`.
+
+For the provided sample notebooks you will also need:
+```
+jupyter
+matplotlib
+seaborn
+sentencepiece
+```
+
+**note:** The script [download_drd2_dataset.sh](https://github.com/DEShawResearch/DESMILES/blob/master/tests/download_drd2_dataset.sh) requires`rdkit==2018.09.01`  `scikit-learn==0.19.2` are needed.
+
+
+**Conda**
 
 For easy installation, we've also provided a conda [environment.yml](environment.yml).  Refer to the [miniconda documentation](https://docs.conda.io/en/latest/miniconda.html) for instructions for installing conda.  The conda environment is all that is required for CPU applications.  For GPU applications, the environment is limited to CUDA 10.  Running DESMILES on GPUs not compatible with CUDA 10 requires building pytorch 1.0.0 from source.
+
+**Containers**
 
 We're including a [Dockerfile](Dockerfile) to build a containerized, GPU-enabled version of DESMILES.  You can build a docker image by running:
 
