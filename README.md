@@ -29,7 +29,7 @@ seaborn
 sentencepiece
 ```
 
-**note:** The script [download_drd2_dataset.sh](https://github.com/DEShawResearch/DESMILES/blob/master/tests/download_drd2_dataset.sh) requires`rdkit==2018.09.01`  `scikit-learn==0.19.2` are needed.
+**note:** The script [download_drd2_dataset.sh](https://github.com/DEShawResearch/DESMILES/blob/master/tests/download_drd2_dataset.sh) requires`rdkit==2018.09.01` and `scikit-learn==0.19.2`.
 
 
 **Conda**
